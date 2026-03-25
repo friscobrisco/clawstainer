@@ -12,6 +12,7 @@ pub fn run(args: CreateArgs, runtime: &dyn Runtime, state: &StateStore) -> Resul
         cpus: args.cpus,
         network: args.network,
         timeout: args.timeout,
+        runtime: args.runtime,
     };
 
     let machine = runtime.create(opts, state)?;

@@ -21,6 +21,12 @@ pub struct Machine {
     pub components: Vec<String>,
     pub timeout: u64,
     pub root_path: String,
+    #[serde(default = "default_runtime")]
+    pub runtime: String,
+}
+
+fn default_runtime() -> String {
+    "nspawn".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -142,6 +148,7 @@ mod tests {
             components: vec!["python3".to_string()],
             timeout: 0,
             root_path: "/tmp/test".to_string(),
+            runtime: "nspawn".to_string(),
         }
     }
 

@@ -124,6 +124,7 @@ impl Runtime for NspawnRuntime {
             components: Vec::new(),
             timeout: opts.timeout,
             root_path: root_path.to_string_lossy().to_string(),
+            runtime: "nspawn".to_string(),
         };
 
         state.with_lock(|s| {

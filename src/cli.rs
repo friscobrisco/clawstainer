@@ -57,6 +57,10 @@ pub struct CreateArgs {
     /// Auto-destroy after N seconds (0 = no timeout)
     #[arg(long, default_value = "0")]
     pub timeout: u64,
+
+    /// Runtime backend: "nspawn" | "firecracker"
+    #[arg(long, default_value = "nspawn")]
+    pub runtime: String,
 }
 
 #[derive(clap::Args)]

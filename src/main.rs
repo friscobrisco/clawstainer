@@ -3,6 +3,7 @@ mod commands;
 mod component;
 mod error;
 mod execlog;
+mod firecracker;
 mod image;
 mod lima;
 mod network;
@@ -15,7 +16,9 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use error::ClawError;
 use output::CliError;
+use runtime::firecracker::FirecrackerRuntime;
 use runtime::nspawn::NspawnRuntime;
+use runtime::Runtime;
 use state::StateStore;
 
 fn main() {
@@ -37,21 +40,45 @@ fn main() {
         }
     };
 
-    let runtime = NspawnRuntime::new();
-
     let result = match cli.command {
-        Commands::Create(args) => commands::create::run(args, &runtime, &state),
-        Commands::Provision(args) => commands::provision::run(args, &runtime, &state),
-        Commands::Exec(args) => commands::exec::run(args, &runtime, &state),
-        Commands::Shell(args) => commands::shell::run(args, &runtime, &state),
-        Commands::Destroy(args) => commands::destroy::run(args, &runtime, &state),
+        Commands::Create(args) => {
+            let rt = make_runtime(&args.runtime);
+            commands::create::run(args, rt.as_ref(), &state)
+        }
+        Commands::Provision(args) => {
+            let rt = runtime_for_machine(&args.machine_id, &state);
+            commands::provision::run(args, rt.as_ref(), &state)
+        }
+        Commands::Exec(args) => {
+            let rt = runtime_for_machine(&args.machine_id, &state);
+            commands::exec::run(args, rt.as_ref(), &state)
+        }
+        Commands::Shell(args) => {
+            let rt = runtime_for_machine(&args.machine_id, &state);
+            commands::shell::run(args, rt.as_ref(), &state)
+        }
+        Commands::Destroy(args) => {
+            if args.all {
+                // For --all, use nspawn as default (destroy reads per-machine runtime)
+                let rt = NspawnRuntime::new();
+                commands::destroy::run(args, &rt, &state)
+            } else if let Some(ref id) = args.machine_id {
+                let rt = runtime_for_machine(id, &state);
+                commands::destroy::run(args, rt.as_ref(), &state)
+            } else {
+                let rt = NspawnRuntime::new();
+                commands::destroy::run(args, &rt, &state)
+            }
+        }
         Commands::List(args) => commands::list::run(args, &state),
         Commands::Logs(args) => commands::logs::run(args),
-        Commands::Stats(args) => commands::stats::run(args, &runtime, &state),
+        Commands::Stats(args) => {
+            let rt = runtime_for_machine(&args.machine_id, &state);
+            commands::stats::run(args, rt.as_ref(), &state)
+        }
     };
 
     if let Err(e) = result {
-        // Try to downcast to our typed error
         if let Some(claw_err) = e.downcast_ref::<ClawError>() {
             let mut cli_err = CliError::new(claw_err.code(), claw_err.to_string());
             if let Some(hint) = claw_err.hint() {
@@ -59,7 +86,26 @@ fn main() {
             }
             cli_err.exit();
         }
-        // Fallback for unexpected errors
         CliError::new("internal_error", format!("{e:#}")).exit();
     }
+}
+
+fn make_runtime(name: &str) -> Box<dyn Runtime> {
+    match name {
+        "firecracker" | "fc" => Box::new(FirecrackerRuntime::new()),
+        _ => Box::new(NspawnRuntime::new()),
+    }
+}
+
+fn runtime_for_machine(machine_id: &str, state: &StateStore) -> Box<dyn Runtime> {
+    let runtime_name = state
+        .with_read_lock(|s| {
+            Ok(s.machines
+                .get(machine_id)
+                .map(|m| m.runtime.clone())
+                .unwrap_or_else(|| "nspawn".to_string()))
+        })
+        .unwrap_or_else(|_| "nspawn".to_string());
+
+    make_runtime(&runtime_name)
 }

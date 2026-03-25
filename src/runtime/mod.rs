@@ -1,3 +1,4 @@
+pub mod firecracker;
 pub mod nspawn;
 
 use anyhow::Result;
@@ -20,6 +21,7 @@ pub struct CreateOpts {
     pub cpus: u32,
     pub network: String,
     pub timeout: u64,
+    pub runtime: String,
 }
 
 pub struct ExecOpts {
