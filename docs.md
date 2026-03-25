@@ -4,6 +4,10 @@
 
 clawstainer is a CLI tool that spins up disposable Linux sandboxes for AI agents. Each sandbox is an isolated machine with its own filesystem, network, and process space. Agents interact with sandboxes by executing commands and reading structured JSON output.
 
+Two runtime backends are available:
+- **nspawn** (default) — container-based isolation via `systemd-nspawn`. Works on any Linux host, including macOS via Lima.
+- **Firecracker** — microVM-based isolation with a separate kernel per sandbox. Requires a KVM-capable Linux host (bare metal or cloud with nested virtualization).
+
 ---
 
 ## Installation
@@ -16,26 +20,84 @@ cd clawstainer
 cargo install --path .
 ```
 
-### Platform support
+### macOS
 
-| Platform | How it works |
-|----------|-------------|
-| Linux | Runs natively using `systemd-nspawn` |
-| macOS | Automatically provisions a Lima Linux VM and proxies commands into it |
-
-#### Linux dependencies
-
-```bash
-sudo apt-get install -y systemd-container debootstrap
-```
-
-#### macOS dependencies
+clawstainer uses [Lima](https://lima-vm.io/) to transparently run a Linux VM on macOS. You don't interact with Lima directly — the CLI manages it automatically.
 
 ```bash
 brew install lima
+cargo install --path .
+clawstainer create --name my-box   # just works
 ```
 
-Lima is installed automatically if missing when you first run a command.
+On first run, Lima provisions an Ubuntu 24.04 VM with `systemd-nspawn`, builds the Linux binary, and caches everything. This takes ~2 minutes once. After that, commands run immediately.
+
+**macOS limitations**:
+- Only the **nspawn** runtime is available. Firecracker requires `/dev/kvm` (hardware virtualization), which is not available inside Lima VMs on Apple Silicon — there is no nested virtualization support.
+- Sandboxes require `sudo` inside the VM. The CLI handles this transparently.
+
+### Linux
+
+Runs natively with no VM layer.
+
+```bash
+# nspawn runtime (default)
+sudo apt-get install -y systemd-container debootstrap
+cargo install --path .
+sudo clawstainer create --name my-box
+```
+
+For Firecracker (requires `/dev/kvm`):
+
+```bash
+sudo clawstainer create --name fast-box --runtime firecracker
+```
+
+### Platform matrix
+
+| Platform | nspawn | Firecracker | Notes |
+|----------|--------|-------------|-------|
+| macOS (Apple Silicon) | Via Lima | No | No nested KVM in Lima VMs |
+| macOS (Intel) | Via Lima | No | Same limitation |
+| Linux bare metal | Native | Native | Full support |
+| Linux VM (cloud) | Native | Needs nested virt | GCP supports it, AWS needs `.metal` |
+| AWS `.metal` instances | Native | Native | Full support |
+
+---
+
+## Runtimes
+
+### nspawn (default)
+
+Uses `systemd-nspawn` to create containers with:
+- Overlay filesystem (each sandbox gets its own writable layer over a shared base image)
+- PID, network, and mount namespaces
+- cgroup v2 resource limits (memory, CPU)
+- Seccomp syscall filtering
+
+Sandboxes share the host kernel. This is fast and lightweight but means a kernel exploit could escape the sandbox.
+
+```bash
+clawstainer create --name my-box                    # uses nspawn by default
+clawstainer create --name my-box --runtime nspawn   # explicit
+```
+
+### Firecracker
+
+Uses [Firecracker](https://firecracker-microvm.github.io/) microVMs with:
+- Separate Linux kernel per sandbox (true VM isolation)
+- Hardware-enforced isolation via KVM
+- ~125ms boot time
+- Per-VM ext4 rootfs (sparse copies for efficiency)
+- Communication via vsock (no network dependency for exec)
+
+Requires `/dev/kvm`. Not available on macOS or inside VMs without nested virtualization.
+
+```bash
+clawstainer create --name fast-box --runtime firecracker
+```
+
+The `--runtime` flag is only needed on `create`. All other commands (`exec`, `shell`, `destroy`, etc.) automatically detect which runtime the sandbox is using.
 
 ---
 
@@ -58,6 +120,7 @@ clawstainer create [OPTIONS]
 | `--cpus <N>` | integer | `1` | Number of CPU cores |
 | `--network <MODE>` | string | `nat` | Network mode. `nat` gives internet access via NAT. `none` disables networking entirely |
 | `--timeout <SECONDS>` | integer | `0` | Auto-destroy the sandbox after N seconds. `0` means no timeout |
+| `--runtime <RUNTIME>` | string | `nspawn` | Runtime backend: `nspawn` or `firecracker`. Firecracker requires `/dev/kvm` |
 
 #### Output
 
@@ -447,15 +510,26 @@ All errors are returned as JSON to stderr with a non-zero exit code:
 ## Architecture
 
 ```
-macOS / Linux host
-  └── clawstainer CLI
-        ├── Lima proxy (macOS only — transparent VM management)
-        └── Runtime Interface
-              ├── NspawnRuntime (MVP — systemd-nspawn)
-              └── FirecrackerRuntime (future)
+macOS                                    Linux (bare metal / cloud)
+  └── clawstainer CLI                      └── clawstainer CLI
+        └── Lima proxy (transparent)             └── Runtime Interface
+              └── Linux VM                             ├── NspawnRuntime (containers)
+                    └── NspawnRuntime                  └── FirecrackerRuntime (microVMs, needs KVM)
 ```
 
+### How the Lima proxy works (macOS)
+
+On macOS, the CLI detects it's not on Linux and transparently:
+1. Ensures a Lima VM is running (creates one on first use)
+2. Builds the Linux binary inside the VM (cached after first build)
+3. Re-executes the same command inside the VM via `limactl shell`
+4. Passes stdout/stderr/exit code back to the user
+
+You never interact with Lima directly. The project directory is mounted writable in the VM, so state is shared.
+
 ### Isolation layers
+
+#### nspawn (containers)
 
 | Layer | Mechanism | What it prevents |
 |-------|-----------|-----------------|
@@ -465,16 +539,31 @@ macOS / Linux host
 | Resources | cgroups v2 | Can't exhaust host CPU/memory |
 | Syscalls | Seccomp (nspawn default) | Blocks dangerous syscalls |
 
+#### Firecracker (microVMs)
+
+| Layer | Mechanism | What it prevents |
+|-------|-----------|-----------------|
+| Filesystem | Separate ext4 disk image | Complete filesystem isolation |
+| Process | Separate kernel | Full process isolation — different OS instance |
+| Network | TAP device + bridge | Isolated network stack |
+| Resources | Firecracker VMM limits | Hardware-enforced CPU/memory limits |
+| Syscalls | KVM hardware boundary | No shared kernel attack surface |
+| Communication | vsock (claw-agent) | No SSH needed, zero network dependency |
+
 ### Networking
 
-Each sandbox gets a virtual ethernet pair connected to a host bridge:
+Both runtimes use the same networking model:
 
 - Bridge: `claw-br0` at `10.0.0.1/24`
-- Each sandbox gets `10.0.0.N/24` (auto-allocated)
+- Each sandbox gets `10.0.0.N/24` (auto-allocated from pool)
 - NAT masquerade for outbound internet
-- Sandboxes cannot reach each other
+- Sandboxes cannot reach each other (iptables FORWARD DROP)
 - DNS: `8.8.8.8` / `8.8.4.4`
 - Use `--network none` to disable networking entirely
+
+The difference is how sandboxes connect to the bridge:
+- **nspawn**: veth pairs (one end in container, one end on bridge)
+- **Firecracker**: TAP devices (attached to bridge, passed to VM as NIC)
 
 ### Filesystem layout
 
@@ -487,17 +576,27 @@ Each sandbox gets a virtual ethernet pair connected to a host bridge:
 
 /var/lib/clawstainer/
 ├── base-images/
-│   └── ubuntu-24.04/       # Shared read-only base image
+│   └── ubuntu-24.04/       # Shared read-only base image (directory)
+├── firecracker/
+│   ├── bin/firecracker      # Firecracker binary (auto-downloaded)
+│   ├── bin/claw-agent       # Guest agent binary
+│   ├── kernels/vmlinux      # Linux kernel for VMs (auto-downloaded)
+│   └── base-rootfs.ext4    # Base image converted to ext4 (for Firecracker)
 └── machines/
-    └── sb-a1b2c3d4/        # Per-machine overlay
-        ├── upper/
-        ├── work/
-        └── rootfs/          # Merged overlay mount
+    └── sb-a1b2c3d4/        # Per-machine storage
+        ├── upper/           # nspawn: overlay upper layer
+        ├── work/            # nspawn: overlay work dir
+        ├── rootfs/          # nspawn: merged overlay mount
+        ├── rootfs.ext4      # Firecracker: per-VM disk image
+        ├── firecracker.sock # Firecracker: API socket
+        └── vsock.sock       # Firecracker: vsock UDS for guest agent
 ```
 
 ### State management
 
 Machine state is stored in `~/.clawstainer/state.json` with filesystem advisory locking (`flock`). Writes are atomic (write to temp file, then rename). Concurrent CLI invocations are safe.
+
+Each machine record tracks which runtime backend created it (`"runtime": "nspawn"` or `"runtime": "firecracker"`), so commands like `exec` and `destroy` automatically use the correct backend.
 
 ---
 

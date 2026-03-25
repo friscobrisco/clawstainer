@@ -2,7 +2,9 @@
 
 Lightweight, isolated Linux environments for AI agents. Spin up a sandbox in seconds, run commands, install packages, tear it down — all from a single CLI.
 
-Built in Rust. Uses `systemd-nspawn` under the hood, with an interface designed to swap in Firecracker microVMs later.
+Built in Rust. Two runtime backends:
+- **systemd-nspawn** — container-based, works everywhere including macOS via Lima
+- **Firecracker** — microVM-based, hardware-level isolation, requires bare metal or KVM-capable Linux
 
 ## Quick Start
 
@@ -29,14 +31,51 @@ clawstainer stats <id>
 clawstainer destroy <id>
 ```
 
-## Requirements
+## Platform Support
 
-- **Linux**: `systemd-nspawn` (`apt-get install systemd-container`) and `debootstrap`
-- **macOS**: Automatically managed via [Lima](https://lima-vm.io/) (`brew install lima`). The CLI proxies into a Linux VM transparently.
+### macOS (Apple Silicon / Intel)
+
+clawstainer uses [Lima](https://lima-vm.io/) to run a lightweight Linux VM transparently. You just type `clawstainer create` — the CLI handles everything.
+
+```bash
+brew install lima
+cargo install --path .
+clawstainer create --name my-box
+```
+
+On first run, Lima provisions an Ubuntu 24.04 VM with `systemd-nspawn` and builds the Linux binary automatically. This takes ~2 minutes. Subsequent runs are instant.
+
+> **Note**: Only the nspawn runtime works on macOS. Firecracker requires hardware virtualization (KVM), which isn't available inside Lima VMs on Apple Silicon due to the lack of nested virtualization.
+
+### Linux (bare metal or VM)
+
+Runs natively with no VM layer. Both runtimes are available.
+
+```bash
+# nspawn runtime (default)
+sudo apt-get install -y systemd-container debootstrap
+cargo install --path .
+sudo clawstainer create --name my-box
+
+# Firecracker runtime (requires /dev/kvm)
+sudo clawstainer create --name fast-box --runtime firecracker
+```
+
+### Runtime Comparison
+
+| | nspawn (default) | Firecracker |
+|---|---|---|
+| Isolation | Container (shared kernel) | VM (separate kernel) |
+| Boot time | ~2-3s | ~125ms |
+| Security | Namespace/cgroup isolation | Hardware-enforced |
+| macOS via Lima | Yes | No (no nested KVM) |
+| Linux bare metal | Yes | Yes |
+| Linux cloud VM | Yes | Needs nested virt or metal |
+| `/dev/kvm` required | No | Yes |
 
 ## Documentation
 
-See [docs.md](docs.md) for full CLI reference, architecture, and configuration.
+See [docs.md](docs.md) for the full CLI reference, architecture, and configuration.
 
 ## License
 
