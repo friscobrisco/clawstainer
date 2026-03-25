@@ -1,0 +1,57 @@
+components:
+  python3:
+    install: |
+      apt-get update
+      apt-get install -y software-properties-common
+      add-apt-repository -y universe
+      apt-get update
+      apt-get install -y python3 python3-pip python3-venv
+    verify: python3 --version
+    tags: [language, ml]
+
+  nodejs:
+    install: |
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+      apt-get install -y nodejs
+    verify: node --version
+    tags: [language, web]
+
+  git:
+    install: apt-get install -y git
+    verify: git --version
+    tags: [tool, vcs]
+
+  curl:
+    install: apt-get install -y curl
+    verify: curl --version
+    tags: [tool, network]
+
+  build-essential:
+    install: apt-get install -y build-essential
+    verify: gcc --version
+    tags: [tool, compiler]
+
+  docker-cli:
+    install: apt-get install -y docker.io
+    verify: docker --version
+    tags: [tool, container]
+
+  ripgrep:
+    install: apt-get install -y ripgrep
+    verify: rg --version
+    tags: [tool, search]
+
+  jq:
+    install: apt-get install -y jq
+    verify: jq --version
+    tags: [tool, json]
+
+bundles:
+  agent-default:
+    components: [python3, nodejs, git, curl, jq, ripgrep]
+
+  web-dev:
+    components: [nodejs, git, build-essential, curl]
+
+  ml:
+    components: [python3, git, build-essential, curl]

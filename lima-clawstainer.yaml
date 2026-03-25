@@ -1,0 +1,43 @@
+# Lima VM for clawstainer development
+# Ubuntu 24.04 with systemd-nspawn
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+
+cpus: 2
+memory: "2GiB"
+disk: "10GiB"
+
+# Mount the clawstainer project directory
+mounts:
+  - location: "~"
+    writable: false
+  - location: "/Users/reneerosillo/Documents/GitHub/clawstainer"
+    writable: true
+
+# Disable containerd/nerdctl (we don't need Docker in this VM)
+containerd:
+  system: false
+  user: false
+
+# Provision the VM with systemd-nspawn and build tools
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      apt-get update
+      apt-get install -y \
+        systemd-container \
+        debootstrap \
+        curl \
+        xz-utils \
+        iptables \
+        iproute2 \
+        build-essential \
+        pkg-config
+      # Install Rust
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
