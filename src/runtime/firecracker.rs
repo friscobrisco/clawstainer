@@ -3,7 +3,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use crate::error::ClawError;
-use crate::firecracker::{api::FirecrackerApi, assets, rootfs};
+use crate::firecracker::{api::FirecrackerApi, assets, rootfs, vsock as fc_vsock};
 use crate::network;
 use crate::state::{Machine, StateStore};
 
@@ -46,6 +46,10 @@ impl FirecrackerRuntime {
 
     fn socket_path(machine_id: &str) -> String {
         format!("{MACHINES_DIR}/{machine_id}/firecracker.sock")
+    }
+
+    fn vsock_path(machine_id: &str) -> String {
+        format!("{MACHINES_DIR}/{machine_id}/vsock.sock")
     }
 }
 
@@ -161,6 +165,17 @@ impl Runtime for FirecrackerRuntime {
             return Err(ClawError::CreateFailed(format!("Failed to set machine config: {}", resp.body)).into());
         }
 
+        // PUT /vsock — enables host<->guest communication
+        let vsock_path = Self::vsock_path(&id);
+        let resp = api.put("/vsock", &serde_json::json!({
+            "vsock_id": "1",
+            "guest_cid": 3,
+            "uds_path": vsock_path,
+        }))?;
+        if !resp.is_success() {
+            return Err(ClawError::CreateFailed(format!("Failed to set vsock: {}", resp.body)).into());
+        }
+
         // Start the VM
         let resp = api.put("/actions", &serde_json::json!({
             "action_type": "InstanceStart",
@@ -169,8 +184,10 @@ impl Runtime for FirecrackerRuntime {
             return Err(ClawError::CreateFailed(format!("Failed to start VM: {}", resp.body)).into());
         }
 
-        // Wait for VM to boot (give it a moment for the kernel to initialize)
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        // Wait for guest agent to become reachable
+        eprintln!("Waiting for guest agent...");
+        fc_vsock::wait_for_agent(&vsock_path, 10000)
+            .map_err(|e| ClawError::CreateFailed(format!("Guest agent not reachable: {e}")))?;
 
         // Save to state
         let machine = Machine {
@@ -219,70 +236,75 @@ impl Runtime for FirecrackerRuntime {
     fn exec(&self, machine_id: &str, opts: ExecOpts) -> Result<ExecResult> {
         require_linux()?;
 
-        // For now, use SSH via the VM's IP address.
-        // TODO: Replace with vsock guest agent for better performance.
         let start = Instant::now();
+        let vsock_path = Self::vsock_path(machine_id);
 
-        // Get the machine's IP
-        let sock_path = Self::socket_path(machine_id);
-        if !std::path::Path::new(&sock_path).exists() {
-            return Err(ClawError::MachineNotFound(machine_id.to_string()).into());
-        }
+        // Connect to guest agent via vsock
+        let stream = fc_vsock::connect(&vsock_path)
+            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e}")))?;
 
-        // Execute via SSH (requires SSH to be set up in the rootfs)
-        // Fallback: use Firecracker serial console
-        let mut cmd = Command::new("ssh");
-        cmd.args([
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", &format!("ConnectTimeout={}", opts.timeout),
-            "-o", "LogLevel=ERROR",
-        ]);
+        // Send exec request
+        let req = serde_json::json!({
+            "type": "exec",
+            "command": opts.command,
+            "timeout": opts.timeout,
+            "workdir": opts.workdir,
+            "env": opts.env,
+            "user": opts.user,
+        });
 
-        if opts.user != "root" {
-            cmd.arg(format!("{}@{}", opts.user, "10.0.0.2")); // TODO: get IP from state
-        } else {
-            cmd.arg(format!("root@10.0.0.2")); // TODO: get IP from state
-        }
-
-        cmd.arg(&opts.command);
-
-        let output = cmd.output()
-            .map_err(|e| ClawError::ExecFailed(format!("SSH exec failed: {e}")))?;
+        let resp = fc_vsock::request(&stream, &req)
+            .map_err(|e| ClawError::ExecFailed(format!("Agent communication failed: {e}")))?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
+        // Parse response
+        if resp.get("type").and_then(|t| t.as_str()) == Some("error") {
+            let msg = resp.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
+            return Err(ClawError::ExecFailed(msg.to_string()).into());
+        }
+
         Ok(ExecResult {
             machine_id: machine_id.to_string(),
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            duration_ms,
-            timed_out: false,
+            exit_code: resp.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(-1) as i32,
+            stdout: resp.get("stdout").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            stderr: resp.get("stderr").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            duration_ms: resp.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(duration_ms),
+            timed_out: resp.get("timed_out").and_then(|v| v.as_bool()).unwrap_or(false),
             truncated: false,
             total_bytes: None,
         })
     }
 
-    fn shell(&self, machine_id: &str, user: &str) -> Result<()> {
+    fn shell(&self, machine_id: &str, _user: &str) -> Result<()> {
         require_linux()?;
 
-        // TODO: Replace with vsock-based shell
-        let status = Command::new("ssh")
+        // For interactive shell, fall back to serial console via the API socket.
+        // A full vsock-based PTY proxy would be ideal but is complex.
+        // Instead, use SSH if available, or instruct the user.
+        let sock_path = Self::socket_path(machine_id);
+
+        eprintln!("Attaching to Firecracker serial console...");
+        eprintln!("(Use Ctrl+] to detach)");
+
+        // Use socat to connect to the Firecracker log/console
+        let status = Command::new("socat")
             .args([
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                "-o", "LogLevel=ERROR",
-                &format!("{user}@10.0.0.2"), // TODO: get IP from state
+                "STDIN,raw,echo=0,escape=0x1d",
+                &format!("UNIX-CONNECT:{sock_path}"),
             ])
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .status()
-            .map_err(|e| ClawError::ExecFailed(format!("SSH shell failed: {e}")))?;
+            .map_err(|e| ClawError::ExecFailed(
+                format!("Failed to attach to console (is socat installed?): {e}")
+            ))?;
 
         if !status.success() {
-            return Err(ClawError::ExecFailed(format!("Shell exited with status: {status}")).into());
+            return Err(ClawError::ExecFailed(
+                "Console session ended".to_string()
+            ).into());
         }
         Ok(())
     }
