@@ -24,6 +24,9 @@ clawstainer provision <id> --components python3,git,curl
 # Open a shell
 clawstainer shell <id>
 
+# Forward a port into the sandbox
+clawstainer port-forward <id> 8080:8080
+
 # Check resource usage
 clawstainer stats <id>
 

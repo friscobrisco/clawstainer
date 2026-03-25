@@ -34,6 +34,19 @@ pub enum Commands {
 
     /// Show live resource usage for a sandbox
     Stats(StatsArgs),
+
+    /// Forward a port from the host to a sandbox
+    #[command(name = "port-forward")]
+    PortForward(PortForwardArgs),
+}
+
+#[derive(clap::Args)]
+pub struct PortForwardArgs {
+    /// Machine ID
+    pub machine_id: String,
+
+    /// Port mapping: HOST_PORT:SANDBOX_PORT (e.g. 8080:8080 or just 8080 for same port)
+    pub port: String,
 }
 
 #[derive(clap::Args)]

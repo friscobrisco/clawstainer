@@ -283,6 +283,7 @@ One of `--components` or `--file` is required.
 | `docker-cli` | Docker CLI |
 | `ripgrep` | ripgrep (`rg`) |
 | `jq` | jq |
+| `openclaw` | OpenClaw gateway (installed via `openclaw.ai`, runs as systemd service) |
 
 #### Available bundles
 
@@ -293,6 +294,7 @@ Bundles are groups of components installed together:
 | `agent-default` | python3, nodejs, git, curl, jq, ripgrep |
 | `web-dev` | nodejs, git, build-essential, curl |
 | `ml` | python3, git, build-essential, curl |
+| `openclaw` | curl, openclaw |
 
 #### Examples
 
@@ -474,6 +476,41 @@ clawstainer stats sb-a1b2c3d4 --watch 2
 # JSON for programmatic use
 clawstainer stats sb-a1b2c3d4 --format json
 ```
+
+---
+
+### `clawstainer port-forward`
+
+Forward a host port into a running sandbox via iptables DNAT rules.
+
+```bash
+clawstainer port-forward <MACHINE_ID> <PORT>
+```
+
+#### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `MACHINE_ID` | The sandbox ID (e.g. `sb-a1b2c3d4`) |
+| `PORT` | Port mapping: `HOST_PORT:SANDBOX_PORT` (e.g. `8080:3000`) or a single port for same on both sides (e.g. `8080`) |
+
+#### Examples
+
+```bash
+# Forward host port 8080 to sandbox port 8080
+clawstainer port-forward sb-a1b2c3d4 8080
+
+# Forward host port 9090 to sandbox port 3000
+clawstainer port-forward sb-a1b2c3d4 9090:3000
+```
+
+#### Notes
+
+- Sets up PREROUTING and OUTPUT DNAT rules so traffic to `localhost:<HOST_PORT>` reaches the sandbox.
+- Also adds a FORWARD ACCEPT rule for the destination.
+- Requires root (iptables). On macOS via Lima, this runs inside the VM transparently.
+- The sandbox must be running and have an IP (i.e., not created with `--network none`).
+- Port forwarding rules are not persisted — they are lost if the host reboots or the sandbox is destroyed.
 
 ---
 
