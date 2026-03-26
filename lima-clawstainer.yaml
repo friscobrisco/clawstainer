@@ -9,7 +9,7 @@ images:
 
 cpus: 2
 memory: "2GiB"
-disk: "10GiB"
+disk: "30GiB"
 
 # Mount the clawstainer project directory
 mounts:

@@ -462,10 +462,10 @@ Every `exec` call is logged automatically with timestamp, command, exit code, an
 
 ### `clawstainer stats`
 
-Show live resource usage for a sandbox.
+Show resource usage. Without a machine ID, shows global host disk usage and per-sandbox summary. With a machine ID, shows detailed stats for that sandbox.
 
 ```bash
-clawstainer stats <MACHINE_ID> [OPTIONS]
+clawstainer stats [MACHINE_ID] [OPTIONS]
 ```
 
 #### Options
@@ -487,16 +487,30 @@ Disk:    1200 MB / 8853 MB
 Procs:   8
 ```
 
+#### Global stats (no machine ID)
+
+```
+Host Disk: 6127 MB / 28690 MB (21.4%) — 22547 MB available
+
+ID               NAME             STATUS           DISK
+sb-6c234aaa      hermes           running       1560 MB
+sb-f76d42b3      dev-box          running        716 MB
+```
+
 #### Examples
 
 ```bash
-# One-shot
+# Global stats — host disk and per-sandbox summary
+clawstainer stats
+
+# Per-sandbox stats
 clawstainer stats sb-a1b2c3d4
 
 # Live monitoring (refresh every 2 seconds)
 clawstainer stats sb-a1b2c3d4 --watch 2
 
 # JSON for programmatic use
+clawstainer stats --format json
 clawstainer stats sb-a1b2c3d4 --format json
 ```
 

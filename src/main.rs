@@ -74,8 +74,12 @@ fn main() {
         Commands::Logs(args) => commands::logs::run(args),
         Commands::PortForward(args) => commands::port_forward::run(args, &state),
         Commands::Stats(args) => {
-            let rt = runtime_for_machine(&args.machine_id, &state);
-            commands::stats::run(args, rt.as_ref(), &state)
+            if let Some(ref id) = args.machine_id {
+                let rt = runtime_for_machine(id, &state);
+                commands::stats::run(args, rt.as_ref(), &state)
+            } else {
+                commands::stats::run_global(&args, &state)
+            }
         }
     };
 

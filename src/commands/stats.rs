@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::cli::StatsArgs;
@@ -7,6 +7,7 @@ use crate::output;
 use crate::runtime::{ExecOpts, Runtime};
 use crate::state::StateStore;
 use std::collections::HashMap;
+use std::process::Command;
 
 #[derive(Debug, Serialize)]
 pub struct MachineStats {
@@ -22,13 +23,15 @@ pub struct MachineStats {
 }
 
 pub fn run(args: StatsArgs, runtime: &dyn Runtime, state: &StateStore) -> Result<()> {
+    let machine_id = args.machine_id.as_ref().unwrap();
+
     // Verify machine exists and is running
     let machine = state.with_read_lock(|s| {
-        let m = s.machines.get(&args.machine_id)
-            .ok_or_else(|| ClawError::MachineNotFound(args.machine_id.clone()))?;
+        let m = s.machines.get(machine_id)
+            .ok_or_else(|| ClawError::MachineNotFound(machine_id.clone()))?;
         if m.status != "running" {
             return Err(ClawError::MachineNotRunning(
-                args.machine_id.clone(),
+                machine_id.clone(),
                 m.status.clone(),
             ).into());
         }
@@ -39,16 +42,123 @@ pub fn run(args: StatsArgs, runtime: &dyn Runtime, state: &StateStore) -> Result
         loop {
             // Clear screen
             eprint!("\x1b[2J\x1b[H");
-            let stats = collect_stats(&args.machine_id, &machine.memory_mb, runtime)?;
+            let stats = collect_stats(machine_id, &machine.memory_mb, runtime)?;
             print_stats(&stats, &args.format);
             std::thread::sleep(std::time::Duration::from_secs(args.watch));
         }
     } else {
-        let stats = collect_stats(&args.machine_id, &machine.memory_mb, runtime)?;
+        let stats = collect_stats(machine_id, &machine.memory_mb, runtime)?;
         print_stats(&stats, &args.format);
     }
 
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct GlobalStats {
+    pub host_disk_total_mb: f64,
+    pub host_disk_used_mb: f64,
+    pub host_disk_avail_mb: f64,
+    pub host_disk_percent: f64,
+    pub sandboxes: Vec<SandboxSummary>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SandboxSummary {
+    pub machine_id: String,
+    pub name: String,
+    pub status: String,
+    pub disk_used_mb: f64,
+}
+
+pub fn run_global(args: &StatsArgs, state: &StateStore) -> Result<()> {
+    // Get host disk usage (works both on native Linux and inside Lima VM)
+    let df_output = Command::new("df")
+        .args(["-k", "/var/lib/clawstainer"])
+        .output()
+        .or_else(|_| Command::new("df").args(["-k", "/"]).output())
+        .context("Failed to get disk usage")?;
+
+    let df_str = String::from_utf8_lossy(&df_output.stdout);
+    let (host_total, host_used, host_avail) = parse_df_output(&df_str);
+
+    let host_percent = if host_total > 0.0 {
+        (host_used / host_total * 100.0 * 10.0).round() / 10.0
+    } else {
+        0.0
+    };
+
+    // Get per-sandbox disk usage
+    let machines = state.with_read_lock(|s| Ok(s.machines.clone()))?;
+    let mut sandboxes = Vec::new();
+
+    for (id, machine) in &machines {
+        let machine_dir = format!("/var/lib/clawstainer/machines/{}", id);
+        let du_output = Command::new("du")
+            .args(["-sk", &machine_dir])
+            .output();
+
+        let disk_used_mb = match du_output {
+            Ok(o) if o.status.success() => {
+                let s = String::from_utf8_lossy(&o.stdout);
+                s.split_whitespace()
+                    .next()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(0.0) / 1024.0
+            }
+            _ => 0.0,
+        };
+
+        sandboxes.push(SandboxSummary {
+            machine_id: id.clone(),
+            name: machine.name.clone(),
+            status: machine.status.clone(),
+            disk_used_mb: (disk_used_mb * 10.0).round() / 10.0,
+        });
+    }
+
+    let global = GlobalStats {
+        host_disk_total_mb: host_total,
+        host_disk_used_mb: host_used,
+        host_disk_avail_mb: host_avail,
+        host_disk_percent: host_percent,
+        sandboxes,
+    };
+
+    if args.format == "json" {
+        output::print_json(&global);
+    } else {
+        println!("Host Disk: {:.0} MB / {:.0} MB ({:.1}%) — {:.0} MB available",
+            global.host_disk_used_mb, global.host_disk_total_mb,
+            global.host_disk_percent, global.host_disk_avail_mb);
+        println!();
+
+        if global.sandboxes.is_empty() {
+            println!("No sandboxes running.");
+        } else {
+            println!("{:<16} {:<16} {:<10} {:>10}",
+                "ID", "NAME", "STATUS", "DISK");
+            for sb in &global.sandboxes {
+                println!("{:<16} {:<16} {:<10} {:>8.0} MB",
+                    sb.machine_id, sb.name, sb.status, sb.disk_used_mb);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_df_output(output: &str) -> (f64, f64, f64) {
+    if let Some(line) = output.lines().nth(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 4 {
+            let total = parts[1].parse::<f64>().unwrap_or(0.0) / 1024.0;
+            let used = parts[2].parse::<f64>().unwrap_or(0.0) / 1024.0;
+            let avail = parts[3].parse::<f64>().unwrap_or(0.0) / 1024.0;
+            return (total, used, avail);
+        }
+    }
+    (0.0, 0.0, 0.0)
 }
 
 fn collect_stats(machine_id: &str, memory_limit: &u32, runtime: &dyn Runtime) -> Result<MachineStats> {

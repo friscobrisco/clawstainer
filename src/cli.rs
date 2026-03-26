@@ -170,8 +170,8 @@ pub struct LogsArgs {
 
 #[derive(clap::Args)]
 pub struct StatsArgs {
-    /// Machine ID
-    pub machine_id: String,
+    /// Machine ID (omit for global stats)
+    pub machine_id: Option<String>,
 
     /// Watch mode: refresh every N seconds (0 = one-shot)
     #[arg(long, default_value = "0")]
