@@ -2,3 +2,4 @@
 /target-linux/
 *.lock
 .DS_Store
+CHEATSHEET.md

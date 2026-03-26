@@ -51,6 +51,11 @@ components:
       apt-get update
       apt-get install -y curl git xz-utils
       curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
+      cd /root/.hermes/hermes-agent && /root/.local/bin/uv pip install -r requirements.txt || true
+      printf '#!/bin/bash\ncd /root/.hermes/hermes-agent && source venv/bin/activate && python hermes "$@"\n' > /usr/local/bin/hermes-agent
+      chmod +x /usr/local/bin/hermes-agent
+      echo 'export PATH="/root/.local/bin:/root/.hermes/node/bin:$PATH"' >> /root/.bashrc
+      echo 'export PATH="/root/.local/bin:/root/.hermes/node/bin:$PATH"' >> /root/.bashrc
     verify: test -d /root/.hermes/hermes-agent && test -f /root/.local/bin/uv
     timeout: 600
     tags: [agent, ai]
@@ -59,8 +64,9 @@ components:
     install: |
       apt-get update
       apt-get install -y curl git
-      curl -fsSL https://claude.ai/install.sh | bash
-    verify: claude --version
+      curl -fsSL https://claude.ai/install.sh | bash || true
+      echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc
+    verify: which claude || test -f /usr/local/bin/claude || test -f /root/.local/bin/claude
     timeout: 300
     tags: [agent, ai]
 

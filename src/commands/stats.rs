@@ -74,6 +74,19 @@ pub struct SandboxSummary {
 }
 
 pub fn run_global(args: &StatsArgs, state: &StateStore) -> Result<()> {
+    if args.watch > 0 {
+        loop {
+            eprint!("\x1b[2J\x1b[H");
+            print_global_stats(args, state)?;
+            std::thread::sleep(std::time::Duration::from_secs(args.watch));
+        }
+    } else {
+        print_global_stats(args, state)?;
+    }
+    Ok(())
+}
+
+fn print_global_stats(args: &StatsArgs, state: &StateStore) -> Result<()> {
     // Get host disk usage (works both on native Linux and inside Lima VM)
     let df_output = Command::new("df")
         .args(["-k", "/var/lib/clawstainer"])
