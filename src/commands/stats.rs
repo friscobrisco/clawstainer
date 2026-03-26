@@ -112,10 +112,12 @@ pub fn run_global(args: &StatsArgs, state: &StateStore) -> Result<()> {
         };
 
         // Read live memory usage from cgroup
+        // systemd-nspawn uses machine-<id>.scope with hyphens escaped as \x2d
         let memory_used_mb = if machine.status == "running" {
+            let escaped_id = id.replace('-', "\\x2d");
             let cgroup_path = format!(
-                "/sys/fs/cgroup/machine.slice/systemd-nspawn@{}.service/memory.current",
-                id
+                "/sys/fs/cgroup/machine.slice/machine-{}.scope/memory.current",
+                escaped_id
             );
             std::fs::read_to_string(&cgroup_path)
                 .ok()
