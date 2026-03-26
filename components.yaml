@@ -46,8 +46,17 @@ components:
     verify: jq --version
     tags: [tool, json]
 
+  hermes-agent:
+    install: |
+      apt-get update
+      apt-get install -y curl
+      curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+    verify: hermes-agent --version
+    tags: [agent, ai]
+
   openclaw:
     install: |
+      apt-get update
       apt-get install -y curl git
       curl -fsSL https://openclaw.ai/install.sh | bash || true
       cat > /etc/systemd/system/openclaw-gateway.service << 'UNIT'

@@ -283,6 +283,7 @@ One of `--components` or `--file` is required.
 | `docker-cli` | Docker CLI |
 | `ripgrep` | ripgrep (`rg`) |
 | `jq` | jq |
+| `hermes-agent` | Hermes agent from NousResearch (installed via remote script) |
 | `openclaw` | OpenClaw gateway (installed via `openclaw.ai`, runs as systemd service) |
 
 #### Available bundles
