@@ -283,8 +283,9 @@ One of `--components` or `--file` is required.
 | `docker-cli` | Docker CLI |
 | `ripgrep` | ripgrep (`rg`) |
 | `jq` | jq |
-| `hermes-agent` | Hermes agent from NousResearch (installed via remote script) |
-| `openclaw` | OpenClaw gateway (installed via `openclaw.ai`, runs as systemd service) |
+| `claude-code` | Claude Code CLI (installed via `claude.ai`). Timeout: 300s |
+| `hermes-agent` | Hermes agent from NousResearch (installed via remote script). Timeout: 600s |
+| `openclaw` | OpenClaw gateway (installed via `openclaw.ai`, runs as systemd service). Timeout: 600s |
 
 #### Available bundles
 
@@ -296,6 +297,26 @@ Bundles are groups of components installed together:
 | `web-dev` | nodejs, git, build-essential, curl |
 | `ml` | python3, git, build-essential, curl |
 | `openclaw` | curl, openclaw |
+
+#### AI Agent Templates
+
+Ready-to-use components for spinning up AI agent sandboxes:
+
+```bash
+# Claude Code sandbox
+clawstainer create --name claude-box --memory 2048 --cpus 2
+clawstainer provision <id> --components claude-code
+
+# Hermes Agent sandbox (needs 4GB+ for Python, Node.js, and agent)
+clawstainer create --name hermes-box --memory 4096 --cpus 2
+clawstainer provision <id> --components hermes-agent
+
+# OpenClaw Gateway sandbox
+clawstainer create --name openclaw-box --memory 2048 --cpus 2
+clawstainer provision <id> --components openclaw
+```
+
+These components have built-in timeouts so you don't need to pass `--timeout` manually.
 
 #### Examples
 
@@ -309,12 +330,13 @@ clawstainer provision sb-a1b2c3d4 --components python3,git,curl
 # Install a bundle
 clawstainer provision sb-a1b2c3d4 --components agent-default
 
-# Longer timeout for heavy installs
+# Override per-component timeout with CLI flag
 clawstainer provision sb-a1b2c3d4 --components nodejs --timeout 300
 ```
 
 #### Notes
 
+- Components can define their own `timeout` (in seconds) in `components.yaml`. The CLI `--timeout` flag overrides the default (120s) but per-component timeouts take priority when set.
 - Components that fail do NOT block the rest. Each result is reported individually.
 - Each component has a `verify` step that confirms the install succeeded (e.g. runs `python3 --version`).
 - Components are defined in `components.yaml`. You can add custom components there.

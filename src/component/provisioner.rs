@@ -32,11 +32,13 @@ impl Provisioner {
             let def = self.components_file.components.get(name).unwrap();
             let start = Instant::now();
 
+            let component_timeout = def.timeout.unwrap_or(timeout);
+
             let exec_result = runtime.exec(
                 machine_id,
                 ExecOpts {
                     command: def.install.clone(),
-                    timeout,
+                    timeout: component_timeout,
                     workdir: "/root".to_string(),
                     env: std::collections::HashMap::new(),
                     user: "root".to_string(),

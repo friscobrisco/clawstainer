@@ -76,6 +76,26 @@ sudo clawstainer create --name fast-box --runtime firecracker
 | Linux cloud VM | Yes | Needs nested virt or metal |
 | `/dev/kvm` required | No | Yes |
 
+## AI Agent Templates
+
+Built-in provisioning templates for popular AI agents:
+
+```bash
+# Claude Code
+clawstainer create --name claude-box --memory 2048 --cpus 2
+clawstainer provision <id> --components claude-code
+
+# Hermes Agent (NousResearch)
+clawstainer create --name hermes-box --memory 4096 --cpus 2
+clawstainer provision <id> --components hermes-agent
+
+# OpenClaw Gateway
+clawstainer create --name openclaw-box --memory 2048 --cpus 2
+clawstainer provision <id> --components openclaw
+```
+
+Each template includes all dependencies and has built-in timeouts — no extra flags needed.
+
 ## Documentation
 
 See [docs.md](docs.md) for the full CLI reference, architecture, and configuration.

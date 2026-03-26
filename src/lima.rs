@@ -170,11 +170,16 @@ fn install_binary_in_vm() -> Result<()> {
 
 /// Build the Linux binary inside the VM if needed
 fn ensure_linux_binary(project: &str, linux_binary: &str) -> Result<()> {
-    // Check if binary exists
+    // Check if binary exists and is newer than source files
+    let check_cmd = format!(
+        "test -f '{linux_binary}' && \
+         ! find '{project}/src' '{project}/Cargo.toml' '{project}/Cargo.lock' '{project}/components.yaml' '{project}/build.rs' \
+         -newer '{linux_binary}' 2>/dev/null | grep -q ."
+    );
     let check = Command::new("limactl")
         .args([
             "shell", VM_NAME, "--",
-            "test", "-f", linux_binary,
+            "bash", "-c", &check_cmd,
         ])
         .status();
 

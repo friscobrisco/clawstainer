@@ -49,12 +49,23 @@ components:
   hermes-agent:
     install: |
       apt-get update
-      apt-get install -y curl
+      apt-get install -y curl git xz-utils
       curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
     verify: hermes-agent --version
+    timeout: 600
+    tags: [agent, ai]
+
+  claude-code:
+    install: |
+      apt-get update
+      apt-get install -y curl git
+      curl -fsSL https://claude.ai/install.sh | bash
+    verify: claude --version
+    timeout: 300
     tags: [agent, ai]
 
   openclaw:
+    timeout: 600
     install: |
       apt-get update
       apt-get install -y curl git

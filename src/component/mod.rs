@@ -21,6 +21,8 @@ pub struct ComponentDef {
     pub verify: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub timeout: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
