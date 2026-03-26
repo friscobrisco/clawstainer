@@ -50,8 +50,8 @@ components:
     install: |
       apt-get update
       apt-get install -y curl git xz-utils
-      curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
-    verify: hermes-agent --version
+      curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
+    verify: PATH="/root/.local/bin:/root/.hermes/node/bin:$PATH" hermes-agent --version
     timeout: 600
     tags: [agent, ai]
 

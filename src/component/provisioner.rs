@@ -34,13 +34,20 @@ impl Provisioner {
 
             let component_timeout = def.timeout.unwrap_or(timeout);
 
+            // Set environment variables to suppress interactive prompts:
+            // - DEBIAN_FRONTEND=noninteractive for apt/dpkg
+            // - NONINTERACTIVE=1 for common install scripts
+            let mut env = std::collections::HashMap::new();
+            env.insert("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string());
+            env.insert("NONINTERACTIVE".to_string(), "1".to_string());
+
             let exec_result = runtime.exec(
                 machine_id,
                 ExecOpts {
                     command: def.install.clone(),
                     timeout: component_timeout,
                     workdir: "/root".to_string(),
-                    env: std::collections::HashMap::new(),
+                    env,
                     user: "root".to_string(),
                 },
             );

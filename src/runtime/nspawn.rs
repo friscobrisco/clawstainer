@@ -82,6 +82,8 @@ impl Runtime for NspawnRuntime {
             "--register=yes",
             &format!("--property=MemoryMax={}M", opts.memory_mb),
             &format!("--property=CPUQuota={}%", opts.cpus * 100),
+            // Use overlay-backed /tmp instead of tiny tmpfs default
+            &format!("--tmpfs=/tmp:mode=1777,size={}M", opts.memory_mb),
         ]);
 
         if opts.network == "nat" {

@@ -68,6 +68,8 @@ pub struct SandboxSummary {
     pub machine_id: String,
     pub name: String,
     pub status: String,
+    pub memory_used_mb: f64,
+    pub memory_limit_mb: u32,
     pub disk_used_mb: f64,
 }
 
@@ -109,10 +111,27 @@ pub fn run_global(args: &StatsArgs, state: &StateStore) -> Result<()> {
             _ => 0.0,
         };
 
+        // Read live memory usage from cgroup
+        let memory_used_mb = if machine.status == "running" {
+            let cgroup_path = format!(
+                "/sys/fs/cgroup/machine.slice/systemd-nspawn@{}.service/memory.current",
+                id
+            );
+            std::fs::read_to_string(&cgroup_path)
+                .ok()
+                .and_then(|s| s.trim().parse::<f64>().ok())
+                .map(|bytes| (bytes / 1024.0 / 1024.0 * 10.0).round() / 10.0)
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+
         sandboxes.push(SandboxSummary {
             machine_id: id.clone(),
             name: machine.name.clone(),
             status: machine.status.clone(),
+            memory_used_mb,
+            memory_limit_mb: machine.memory_mb,
             disk_used_mb: (disk_used_mb * 10.0).round() / 10.0,
         });
     }
@@ -136,11 +155,16 @@ pub fn run_global(args: &StatsArgs, state: &StateStore) -> Result<()> {
         if global.sandboxes.is_empty() {
             println!("No sandboxes running.");
         } else {
-            println!("{:<16} {:<16} {:<10} {:>10}",
-                "ID", "NAME", "STATUS", "DISK");
+            println!("{:<16} {:<16} {:<10} {:>14} {:>10}",
+                "ID", "NAME", "STATUS", "MEMORY", "DISK");
             for sb in &global.sandboxes {
-                println!("{:<16} {:<16} {:<10} {:>8.0} MB",
-                    sb.machine_id, sb.name, sb.status, sb.disk_used_mb);
+                let mem = if sb.status == "running" {
+                    format!("{:.0}/{} MB", sb.memory_used_mb, sb.memory_limit_mb)
+                } else {
+                    format!("{} MB", sb.memory_limit_mb)
+                };
+                println!("{:<16} {:<16} {:<10} {:>14} {:>8.0} MB",
+                    sb.machine_id, sb.name, sb.status, mem, sb.disk_used_mb);
             }
         }
     }
