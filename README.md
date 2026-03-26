@@ -86,7 +86,7 @@ clawstainer create --name claude-box --memory 2048 --cpus 2
 clawstainer provision <id> --components claude-code
 
 # Hermes Agent (NousResearch)
-clawstainer create --name hermes-box --memory 4096 --cpus 2
+clawstainer create --name hermes-box --memory 2048 --cpus 2
 clawstainer provision <id> --components hermes-agent
 
 # OpenClaw Gateway
