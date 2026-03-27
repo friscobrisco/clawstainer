@@ -38,6 +38,50 @@ pub enum Commands {
     /// Forward a port from the host to a sandbox
     #[command(name = "port-forward")]
     PortForward(PortForwardArgs),
+
+    /// Manage fleets of sandboxes from a YAML definition
+    Fleet(FleetArgs),
+}
+
+#[derive(clap::Args)]
+pub struct FleetArgs {
+    #[command(subcommand)]
+    pub command: FleetCommands,
+}
+
+#[derive(Subcommand)]
+pub enum FleetCommands {
+    /// Create all machines defined in a fleet YAML file
+    Create(FleetCreateArgs),
+
+    /// Destroy fleet machines
+    Destroy(FleetDestroyArgs),
+}
+
+#[derive(clap::Args)]
+pub struct FleetCreateArgs {
+    /// Path to fleet YAML definition file
+    #[arg(long, short, default_value = "fleet.yaml")]
+    pub file: String,
+
+    /// Runtime backend: "nspawn" | "firecracker"
+    #[arg(long, default_value = "nspawn")]
+    pub runtime: String,
+
+    /// Network mode: "nat" | "none"
+    #[arg(long, default_value = "nat")]
+    pub network: String,
+}
+
+#[derive(clap::Args)]
+pub struct FleetDestroyArgs {
+    /// Destroy all fleet machines
+    #[arg(long)]
+    pub all: bool,
+
+    /// Destroy machines belonging to a specific fleet group name
+    #[arg(long)]
+    pub name: Option<String>,
 }
 
 #[derive(clap::Args)]

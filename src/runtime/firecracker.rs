@@ -204,6 +204,7 @@ impl Runtime for FirecrackerRuntime {
             timeout: opts.timeout,
             root_path: vm_rootfs.to_string_lossy().to_string(),
             runtime: "firecracker".to_string(),
+            fleet_name: None,
         };
 
         state.with_lock(|s| {

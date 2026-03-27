@@ -1,6 +1,7 @@
 pub mod create;
 pub mod destroy;
 pub mod exec;
+pub mod fleet;
 pub mod list;
 pub mod logs;
 pub mod port_forward;

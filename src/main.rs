@@ -13,7 +13,7 @@ mod state;
 
 use clap::Parser;
 
-use cli::{Cli, Commands};
+use cli::{Cli, Commands, FleetCommands};
 use error::ClawError;
 use output::CliError;
 use runtime::firecracker::FirecrackerRuntime;
@@ -81,6 +81,16 @@ fn main() {
                 commands::stats::run_global(&args, &state)
             }
         }
+        Commands::Fleet(args) => {
+            match args.command {
+                FleetCommands::Create(create_args) => {
+                    commands::fleet::run_create(create_args, &state)
+                }
+                FleetCommands::Destroy(destroy_args) => {
+                    commands::fleet::run_destroy(destroy_args, &state)
+                }
+            }
+        }
     };
 
     if let Err(e) = result {
@@ -95,7 +105,7 @@ fn main() {
     }
 }
 
-fn make_runtime(name: &str) -> Box<dyn Runtime> {
+pub(crate) fn make_runtime(name: &str) -> Box<dyn Runtime> {
     match name {
         "firecracker" | "fc" => Box::new(FirecrackerRuntime::new()),
         _ => Box::new(NspawnRuntime::new()),

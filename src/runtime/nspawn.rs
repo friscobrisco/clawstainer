@@ -127,6 +127,7 @@ impl Runtime for NspawnRuntime {
             timeout: opts.timeout,
             root_path: root_path.to_string_lossy().to_string(),
             runtime: "nspawn".to_string(),
+            fleet_name: None,
         };
 
         state.with_lock(|s| {

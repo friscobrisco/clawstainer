@@ -23,6 +23,8 @@ pub struct Machine {
     pub root_path: String,
     #[serde(default = "default_runtime")]
     pub runtime: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fleet_name: Option<String>,
 }
 
 fn default_runtime() -> String {
@@ -149,6 +151,7 @@ mod tests {
             timeout: 0,
             root_path: "/tmp/test".to_string(),
             runtime: "nspawn".to_string(),
+            fleet_name: None,
         }
     }
 
