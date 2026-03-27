@@ -1,0 +1,6 @@
+machines:
+  - name: openclaw
+    count: 10
+    memory: 1024
+    cpus: 2
+    provision: openclaw
