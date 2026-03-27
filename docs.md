@@ -415,6 +415,7 @@ clawstainer list [OPTIONS]
 |------|------|---------|-------------|
 | `--format <FMT>` | string | `table` | Output format: `table` or `json` |
 | `--status <STATUS>` | string | `all` | Filter: `running`, `stopped`, or `all` |
+| `--watch <SECONDS>` | integer | `0` | Live refresh every N seconds. `0` = one-shot |
 
 #### Table output
 
@@ -548,6 +549,73 @@ clawstainer port-forward sb-a1b2c3d4 9090:3000
 - Requires root (iptables). On macOS via Lima, this runs inside the VM transparently.
 - The sandbox must be running and have an IP (i.e., not created with `--network none`).
 - Port forwarding rules are not persisted — they are lost if the host reboots or the sandbox is destroyed.
+
+---
+
+### `clawstainer fleet`
+
+Manage fleets of sandboxes from a YAML definition. Fleet create uses a two-pass approach: creates all machines first, then provisions them in parallel batches.
+
+#### `clawstainer fleet create`
+
+```bash
+clawstainer fleet create [OPTIONS]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--file, -f <PATH>` | string | `fleet.yaml` | Path to fleet YAML definition file |
+| `--runtime <RUNTIME>` | string | `nspawn` | Runtime backend for all machines |
+| `--network <MODE>` | string | `nat` | Network mode for all machines |
+| `--parallel <N>` | integer | `3` | Max concurrent provisioning jobs (0 = sequential) |
+
+#### Fleet YAML format
+
+```yaml
+machines:
+  - name: hermes-worker    # Group name (machines named hermes-worker-0, hermes-worker-1, etc.)
+    count: 3               # Number of machines to create (default: 1)
+    memory: 2048           # Memory in MB (default: 512)
+    cpus: 2                # CPU cores (default: 1)
+    provision: hermes-agent # Component or bundle to install (optional)
+
+  - name: openclaw
+    count: 10
+    memory: 1024
+    cpus: 2
+    provision: openclaw
+```
+
+If `count` is 1, the machine is named exactly as specified. If `count` > 1, machines are named `{name}-{index}` (e.g., `openclaw-0`, `openclaw-1`, ...).
+
+#### `clawstainer fleet destroy`
+
+```bash
+clawstainer fleet destroy [OPTIONS]
+```
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--all` | flag | Destroy all fleet-managed machines |
+| `--name <NAME>` | string | Destroy machines belonging to a specific fleet group |
+
+One of `--all` or `--name` is required.
+
+#### Examples
+
+```bash
+# Create a fleet with default parallelism (3)
+clawstainer fleet create --file fleet.yaml
+
+# Create with higher parallelism
+clawstainer fleet create --file fleet.yaml --parallel 5
+
+# Destroy one group
+clawstainer fleet destroy --name hermes-worker
+
+# Destroy all fleet machines
+clawstainer fleet destroy --all
+```
 
 ---
 

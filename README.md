@@ -96,6 +96,42 @@ clawstainer provision <id> --components openclaw
 
 Each template includes all dependencies and has built-in timeouts — no extra flags needed.
 
+## Fleet Management
+
+Deploy multiple agent sandboxes from a single YAML definition:
+
+```yaml
+# fleet.yaml
+machines:
+  - name: hermes-worker
+    count: 3
+    memory: 2048
+    cpus: 2
+    provision: hermes-agent
+
+  - name: openclaw
+    count: 10
+    memory: 1024
+    cpus: 2
+    provision: openclaw
+```
+
+```bash
+# Create all machines, then provision in parallel (default: 3 at a time)
+clawstainer fleet create --file fleet.yaml
+
+# Higher parallelism
+clawstainer fleet create --file fleet.yaml --parallel 5
+
+# Destroy a specific group
+clawstainer fleet destroy --name hermes-worker
+
+# Destroy all fleet machines
+clawstainer fleet destroy --all
+```
+
+Fleet create uses a two-pass approach: creates all machines first (visible in `list` immediately), then provisions them in parallel batches.
+
 ## Documentation
 
 See [docs.md](docs.md) for the full CLI reference, architecture, and configuration.
