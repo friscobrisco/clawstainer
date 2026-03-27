@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use crate::cli::{FleetCreateArgs, FleetDestroyArgs};
 use crate::component::Provisioner;
@@ -38,11 +40,12 @@ fn default_cpus() -> u32 { 1 }
 struct FleetCreateResult {
     fleet: Vec<FleetMachineResult>,
     total: u32,
-    succeeded: u32,
+    created: u32,
+    provisioned: u32,
     failed: u32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct FleetMachineResult {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,6 +66,15 @@ struct FleetDestroyResult {
     machines: Vec<String>,
 }
 
+// Info needed for provisioning pass
+struct PendingProvision {
+    machine_name: String,
+    machine_id: String,
+    provision: String,
+    runtime_name: String,
+    result_index: usize,
+}
+
 // --- Fleet Create ---
 
 pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
@@ -79,13 +91,15 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
         return Ok(());
     }
 
-    // Create provisioner upfront (reused for all machines)
-    let provisioner = Provisioner::new()?;
-
-    let mut results = Vec::new();
-    let mut succeeded: u32 = 0;
+    let mut results: Vec<FleetMachineResult> = Vec::new();
+    let mut pending_provisions: Vec<PendingProvision> = Vec::new();
+    let mut created: u32 = 0;
     let mut failed: u32 = 0;
     let mut current: u32 = 0;
+
+    // ── Pass 1: Create all machines ──
+    eprintln!("=== Creating {} machines ===", total);
+    eprintln!();
 
     for def in &fleet.machines {
         for index in 0..def.count {
@@ -96,10 +110,8 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
                 format!("{}-{}", def.name, index)
             };
 
-            // Progress
             eprintln!("[{}/{}] Creating {}...", current, total, machine_name);
 
-            // Create the machine
             let rt = crate::make_runtime(&args.runtime);
             let create_opts = CreateOpts {
                 name: Some(machine_name.clone()),
@@ -140,78 +152,173 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
                 Ok(())
             })?;
 
-            // Provision if specified
-            let provision_status = if let Some(ref provision) = def.provision {
-                eprintln!("[{}/{}] Provisioning {} with {}...", current, total, machine_name, provision);
+            created += 1;
+            let result_index = results.len();
+            results.push(FleetMachineResult {
+                name: machine_name.clone(),
+                id: Some(info.id.clone()),
+                status: "running".to_string(),
+                ip: info.ip,
+                provision_status: None,
+                error: None,
+            });
+
+            // Queue for provisioning
+            if let Some(ref provision) = def.provision {
+                pending_provisions.push(PendingProvision {
+                    machine_name,
+                    machine_id: info.id,
+                    provision: provision.clone(),
+                    runtime_name: args.runtime.clone(),
+                    result_index,
+                });
+            }
+        }
+    }
+
+    // ── Pass 2: Provision machines ──
+    if pending_provisions.is_empty() {
+        eprintln!();
+        eprintln!("Fleet ready: {} created, {} failed, no provisioning needed", created, failed);
+        output::print_json(&FleetCreateResult {
+            fleet: results,
+            total,
+            created,
+            provisioned: 0,
+            failed,
+        });
+        return Ok(());
+    }
+
+    let prov_total = pending_provisions.len();
+    let parallel = if args.parallel == 0 { 1 } else { args.parallel };
+
+    eprintln!();
+    eprintln!("=== Provisioning {} machines (parallel: {}) ===", prov_total, parallel);
+    eprintln!();
+
+    // Shared state for parallel provisioning
+    let results = Arc::new(Mutex::new(results));
+    let provisioned_count = Arc::new(Mutex::new(0u32));
+    let prov_failed_count = Arc::new(Mutex::new(0u32));
+
+    // Process in chunks of `parallel`
+    for chunk in pending_provisions.chunks(parallel) {
+        let mut handles = Vec::new();
+
+        for pending in chunk {
+            let machine_name = pending.machine_name.clone();
+            let machine_id = pending.machine_id.clone();
+            let provision = pending.provision.clone();
+            let runtime_name = pending.runtime_name.clone();
+            let result_index = pending.result_index;
+            let results = Arc::clone(&results);
+            let provisioned_count = Arc::clone(&provisioned_count);
+            let prov_failed_count = Arc::clone(&prov_failed_count);
+
+            let handle = thread::spawn(move || {
+                eprintln!("  Provisioning {} with {}...", machine_name, provision);
+
+                let provisioner = match Provisioner::new() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("  Failed to create provisioner for {}: {}", machine_name, e);
+                        let mut results = results.lock().unwrap();
+                        results[result_index].provision_status = Some("error".to_string());
+                        results[result_index].error = Some(format!("{e}"));
+                        *prov_failed_count.lock().unwrap() += 1;
+                        return;
+                    }
+                };
+
+                let rt = crate::make_runtime(&runtime_name);
+
+                // We need a StateStore for provisioning — create a fresh one
+                let prov_state = match StateStore::new() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("  Failed to open state for {}: {}", machine_name, e);
+                        let mut results = results.lock().unwrap();
+                        results[result_index].provision_status = Some("error".to_string());
+                        results[result_index].error = Some(format!("{e}"));
+                        *prov_failed_count.lock().unwrap() += 1;
+                        return;
+                    }
+                };
 
                 let start = std::time::Instant::now();
                 let prov_result = provisioner.provision(
-                    &info.id,
+                    &machine_id,
                     &[provision.clone()],
-                    120, // default timeout, per-component timeouts override
+                    120,
                     rt.as_ref(),
-                    state,
+                    &prov_state,
                 );
 
                 let elapsed = start.elapsed();
+                let mut results = results.lock().unwrap();
+
                 match prov_result {
                     Ok(result) => {
                         let all_ok = result.results.iter().all(|r| r.status == "ok");
                         if all_ok {
                             eprintln!(
-                                "[{}/{}] Provisioned {} ({:.0}s)",
-                                current, total, machine_name, elapsed.as_secs_f64()
+                                "  Provisioned {} ({:.0}s)",
+                                machine_name, elapsed.as_secs_f64()
                             );
-                            Some("ok".to_string())
+                            results[result_index].provision_status = Some("ok".to_string());
+                            *provisioned_count.lock().unwrap() += 1;
                         } else {
                             let errors: Vec<_> = result.results.iter()
                                 .filter(|r| r.status != "ok")
                                 .map(|r| format!("{}: {}", r.component, r.error.as_deref().unwrap_or("unknown")))
                                 .collect();
                             eprintln!(
-                                "[{}/{}] Provision partial failure for {}: {}",
-                                current, total, machine_name, errors.join(", ")
+                                "  Provision partial for {}: {}",
+                                machine_name, errors.join(", ")
                             );
-                            Some("partial".to_string())
+                            results[result_index].provision_status = Some("partial".to_string());
+                            *provisioned_count.lock().unwrap() += 1;
                         }
                     }
                     Err(e) => {
                         eprintln!(
-                            "[{}/{}] Provision failed for {}: {}",
-                            current, total, machine_name, e
+                            "  Provision failed for {}: {}",
+                            machine_name, e
                         );
-                        Some("error".to_string())
+                        results[result_index].provision_status = Some("error".to_string());
+                        results[result_index].error = Some(format!("{e}"));
+                        *prov_failed_count.lock().unwrap() += 1;
                     }
                 }
-            } else {
-                None
-            };
-
-            succeeded += 1;
-            results.push(FleetMachineResult {
-                name: machine_name,
-                id: Some(info.id),
-                status: "running".to_string(),
-                ip: info.ip,
-                provision_status,
-                error: None,
             });
+
+            handles.push(handle);
+        }
+
+        // Wait for this chunk to finish before starting next
+        for handle in handles {
+            let _ = handle.join();
         }
     }
+
+    let results = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
+    let provisioned = *provisioned_count.lock().unwrap();
+    let prov_failed = *prov_failed_count.lock().unwrap();
 
     // Summary
     eprintln!();
     eprintln!(
-        "Fleet ready: {} created, {} failed",
-        succeeded, failed
+        "Fleet ready: {} created, {} provisioned, {} failed",
+        created, provisioned, failed + prov_failed
     );
 
-    // JSON output
     output::print_json(&FleetCreateResult {
         fleet: results,
         total,
-        succeeded,
-        failed,
+        created,
+        provisioned,
+        failed: failed + prov_failed,
     });
 
     Ok(())

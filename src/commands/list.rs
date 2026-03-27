@@ -5,6 +5,19 @@ use crate::output;
 use crate::state::StateStore;
 
 pub fn run(args: ListArgs, state: &StateStore) -> Result<()> {
+    if args.watch > 0 {
+        loop {
+            eprint!("\x1b[2J\x1b[H");
+            print_list(&args, state)?;
+            std::thread::sleep(std::time::Duration::from_secs(args.watch));
+        }
+    } else {
+        print_list(&args, state)?;
+    }
+    Ok(())
+}
+
+fn print_list(args: &ListArgs, state: &StateStore) -> Result<()> {
     let machines = state.with_read_lock(|s| {
         let mut machines: Vec<_> = s.machines.values().cloned().collect();
         if args.status != "all" {

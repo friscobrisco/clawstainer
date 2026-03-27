@@ -71,6 +71,10 @@ pub struct FleetCreateArgs {
     /// Network mode: "nat" | "none"
     #[arg(long, default_value = "nat")]
     pub network: String,
+
+    /// Max parallel provisioning jobs (0 = sequential)
+    #[arg(long, default_value = "3")]
+    pub parallel: usize,
 }
 
 #[derive(clap::Args)]
@@ -192,6 +196,10 @@ pub struct ListArgs {
     /// Filter by status: "running" | "stopped" | "all"
     #[arg(long, default_value = "all")]
     pub status: String,
+
+    /// Watch mode: refresh every N seconds (0 = one-shot)
+    #[arg(long, default_value = "0")]
+    pub watch: u64,
 }
 
 #[derive(clap::Args)]
