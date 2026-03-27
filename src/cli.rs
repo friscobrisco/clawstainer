@@ -26,13 +26,13 @@ pub enum Commands {
     /// Tear down a sandbox and clean up all resources
     Destroy(DestroyArgs),
 
-    /// List all sandboxes with their current status
+    /// List all sandboxes (use --watch N for live refresh)
     List(ListArgs),
 
     /// Show command execution history for a sandbox
     Logs(LogsArgs),
 
-    /// Show live resource usage for a sandbox
+    /// Show resource usage and disk stats (use --watch N for live refresh)
     Stats(StatsArgs),
 
     /// Forward a port from the host to a sandbox
