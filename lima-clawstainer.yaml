@@ -15,7 +15,7 @@ disk: "30GiB"
 mounts:
   - location: "~"
     writable: false
-  - location: "/Users/reneerosillo/Documents/GitHub/clawstainer"
+  - location: "__PROJECT_DIR__"
     writable: true
 
 # Disable containerd/nerdctl (we don't need Docker in this VM)

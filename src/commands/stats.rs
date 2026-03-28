@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::cli::StatsArgs;
-use crate::error::ClawError;
 use crate::output;
 use crate::runtime::{ExecOpts, Runtime};
 use crate::state::StateStore;
@@ -25,18 +24,7 @@ pub struct MachineStats {
 pub fn run(args: StatsArgs, runtime: &dyn Runtime, state: &StateStore) -> Result<()> {
     let machine_id = args.machine_id.as_ref().unwrap();
 
-    // Verify machine exists and is running
-    let machine = state.with_read_lock(|s| {
-        let m = s.machines.get(machine_id)
-            .ok_or_else(|| ClawError::MachineNotFound(machine_id.clone()))?;
-        if m.status != "running" {
-            return Err(ClawError::MachineNotRunning(
-                machine_id.clone(),
-                m.status.clone(),
-            ).into());
-        }
-        Ok(m.clone())
-    })?;
+    let machine = state.get_running_machine(machine_id)?;
 
     if args.watch > 0 {
         loop {
