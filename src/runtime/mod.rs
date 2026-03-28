@@ -22,6 +22,10 @@ pub struct CreateOpts {
     pub network: String,
     pub timeout: u64,
     pub runtime: String,
+    pub security: String,
+    pub cap_add: Vec<String>,
+    pub cap_drop: Vec<String>,
+    pub env_file: Option<String>,
 }
 
 pub struct ExecOpts {

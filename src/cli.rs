@@ -122,6 +122,23 @@ pub struct CreateArgs {
     /// Runtime backend: "nspawn" | "firecracker"
     #[arg(long, default_value = "nspawn")]
     pub runtime: String,
+
+    /// Security profile: "strict" (default) drops CAP_NET_RAW, CAP_SYS_PTRACE, CAP_MKNOD and
+    /// adds --no-new-privileges. "standard" uses nspawn defaults.
+    #[arg(long, default_value = "strict")]
+    pub security: String,
+
+    /// Comma-separated capabilities to add back on top of the security profile
+    #[arg(long, value_name = "CAP,...")]
+    pub cap_add: Option<String>,
+
+    /// Comma-separated capabilities to drop on top of the security profile
+    #[arg(long, value_name = "CAP,...")]
+    pub cap_drop: Option<String>,
+
+    /// Path to a .env file to inject into the sandbox (KEY=VAL format, persists until destroyed)
+    #[arg(long, value_name = "PATH")]
+    pub env_file: Option<String>,
 }
 
 #[derive(clap::Args)]

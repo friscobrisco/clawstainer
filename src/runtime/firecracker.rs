@@ -204,6 +204,8 @@ impl Runtime for FirecrackerRuntime {
             timeout: opts.timeout,
             root_path: vm_rootfs.to_string_lossy().to_string(),
             runtime: "firecracker".to_string(),
+            security: opts.security.clone(),
+            has_env_file: opts.env_file.is_some(),
             fleet_name: None,
         };
 

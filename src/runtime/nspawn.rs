@@ -7,6 +7,8 @@ use crate::image;
 use crate::network;
 use crate::state::{Machine, StateStore};
 
+use std::collections::HashSet;
+
 use super::{
     require_linux, CreateOpts, DestroyResult, ExecOpts, ExecResult, MachineInfo, MachineStatus,
     Runtime,
@@ -14,11 +16,40 @@ use super::{
 
 const MAX_OUTPUT_BYTES: usize = 1_048_576; // 1MB
 
+/// Capabilities dropped in "strict" security profile.
+const STRICT_CAP_DROP: &[&str] = &["CAP_NET_RAW", "CAP_SYS_PTRACE", "CAP_MKNOD"];
+
 pub struct NspawnRuntime;
 
 impl NspawnRuntime {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Resolve the final set of capabilities to drop based on security profile + overrides.
+    fn resolve_caps_to_drop(opts: &CreateOpts) -> Vec<String> {
+        let mut drop_set: HashSet<String> = HashSet::new();
+
+        // Start from the profile baseline
+        if opts.security == "strict" {
+            for cap in STRICT_CAP_DROP {
+                drop_set.insert(cap.to_string());
+            }
+        }
+
+        // Apply explicit --cap-drop additions
+        for cap in &opts.cap_drop {
+            drop_set.insert(cap.clone());
+        }
+
+        // Apply explicit --cap-add removals
+        for cap in &opts.cap_add {
+            drop_set.remove(cap);
+        }
+
+        let mut caps: Vec<String> = drop_set.into_iter().collect();
+        caps.sort();
+        caps
     }
 
     fn generate_id() -> String {
@@ -50,6 +81,7 @@ impl Runtime for NspawnRuntime {
         require_linux()?;
 
         let id = Self::generate_id();
+        let caps_to_drop = Self::resolve_caps_to_drop(&opts);
         let name = opts.name.unwrap_or_else(Self::generate_name);
 
         // Ensure base image exists
@@ -86,6 +118,14 @@ impl Runtime for NspawnRuntime {
             &format!("--tmpfs=/tmp:mode=1777,size={}M", opts.memory_mb),
         ]);
 
+        // Apply security profile
+        if !caps_to_drop.is_empty() {
+            cmd.arg(format!("--drop-capability={}", caps_to_drop.join(",")));
+        }
+        if opts.security == "strict" {
+            cmd.arg("--no-new-privileges=true");
+        }
+
         if opts.network == "nat" {
             cmd.args(["--network-veth", "--network-bridge=claw-br0"]);
         } else {
@@ -112,6 +152,18 @@ impl Runtime for NspawnRuntime {
             configure_container_network(&id, ip)?;
         }
 
+        // Inject env file if provided
+        let has_env_file = if let Some(ref env_file_path) = opts.env_file {
+            if ip.is_none() {
+                // If we didn't configure networking, we still need exec readiness
+                wait_for_exec_ready(&id)?;
+            }
+            inject_env_file(&id, env_file_path)?;
+            true
+        } else {
+            false
+        };
+
         // Save to state
         let machine = Machine {
             id: id.clone(),
@@ -127,6 +179,8 @@ impl Runtime for NspawnRuntime {
             timeout: opts.timeout,
             root_path: root_path.to_string_lossy().to_string(),
             runtime: "nspawn".to_string(),
+            security: opts.security.clone(),
+            has_env_file,
             fleet_name: None,
         };
 
@@ -428,6 +482,62 @@ fn configure_container_network(machine_id: &str, ip: &str) -> Result<()> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(ClawError::CreateFailed(
             format!("Failed to configure container networking: {stderr}")
+        ).into());
+    }
+
+    Ok(())
+}
+
+/// Read a .env file from the host and write its contents into /etc/environment
+/// inside the container. Parses KEY=VAL lines, skips comments and blank lines.
+fn inject_env_file(machine_id: &str, env_file_path: &str) -> Result<()> {
+    let contents = std::fs::read_to_string(env_file_path)
+        .with_context(|| format!("Failed to read env file: {env_file_path}"))?;
+
+    // Parse and filter: keep only KEY=VAL lines, skip comments and blanks
+    let mut env_lines = Vec::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.contains('=') {
+            env_lines.push(trimmed.to_string());
+        }
+    }
+
+    if env_lines.is_empty() {
+        return Ok(());
+    }
+
+    // Use printf to avoid shell interpretation of the values
+    let cmd_str = format!(
+        "printf '%s\\n' {} >> /etc/environment",
+        env_lines
+            .iter()
+            .map(|l| format!("'{}'", l.replace('\'', "'\\''")))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+
+    let output = Command::new("systemd-run")
+        .args([
+            &format!("--machine={machine_id}"),
+            "--wait",
+            "--pipe",
+            "--collect",
+            "--",
+            "sh",
+            "-c",
+            &cmd_str,
+        ])
+        .output()
+        .context("Failed to inject env file into container")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(ClawError::CreateFailed(
+            format!("Failed to inject env file: {stderr}")
         ).into());
     }
 

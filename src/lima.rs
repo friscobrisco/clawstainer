@@ -25,7 +25,7 @@ pub fn proxy_to_vm() -> Result<()> {
     // The project dir is mounted in the VM. The Linux binary is built into
     // target-linux/ to avoid conflicting with the macOS build in target/.
     let project = project_dir()?;
-    let linux_binary = format!("{project}/target-linux/release/clawstainer");
+    let linux_binary = "/tmp/clawstainer-target/release/clawstainer".to_string();
 
     // Build the Linux binary if it doesn't exist or is older than src/
     ensure_linux_binary(&project, &linux_binary)?;
@@ -175,9 +175,10 @@ fn install_binary_in_vm() -> Result<()> {
 fn ensure_linux_binary(project: &str, linux_binary: &str) -> Result<()> {
     // Check if binary exists and is newer than source files
     let check_cmd = format!(
-        "test -f '{linux_binary}' && \
-         ! find '{project}/src' '{project}/Cargo.toml' '{project}/Cargo.lock' '{project}/components.yaml' '{project}/build.rs' \
-         -newer '{linux_binary}' 2>/dev/null | grep -q ."
+        "test -f '{}' && \
+         ! find '{}/src' '{}/Cargo.toml' '{}/Cargo.lock' '{}/components.yaml' '{}/build.rs' \
+         -newer '{}' 2>/dev/null | grep -q .",
+        linux_binary, project, project, project, project, project, linux_binary
     );
     let check = Command::new("limactl")
         .args([
@@ -204,7 +205,7 @@ fn ensure_linux_binary(project: &str, linux_binary: &str) -> Result<()> {
         .status();
 
     let build_cmd = format!(
-        "source \"$HOME/.cargo/env\" && cd '{}' && CARGO_TARGET_DIR=target-linux cargo build --release",
+        "source \"$HOME/.cargo/env\" && cd '{}' && CARGO_TARGET_DIR=/tmp/clawstainer-target cargo build --release",
         project
     );
 

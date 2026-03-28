@@ -24,12 +24,20 @@ pub struct Machine {
     pub root_path: String,
     #[serde(default = "default_runtime")]
     pub runtime: String,
+    #[serde(default = "default_security")]
+    pub security: String,
+    #[serde(default)]
+    pub has_env_file: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fleet_name: Option<String>,
 }
 
 fn default_runtime() -> String {
     "nspawn".to_string()
+}
+
+fn default_security() -> String {
+    "strict".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -180,6 +188,8 @@ mod tests {
             timeout: 0,
             root_path: "/tmp/test".to_string(),
             runtime: "nspawn".to_string(),
+            security: "strict".to_string(),
+            has_env_file: false,
             fleet_name: None,
         }
     }

@@ -28,11 +28,24 @@ struct FleetMachineDef {
     cpus: u32,
     /// Component or bundle name to provision after creation
     provision: Option<String>,
+    /// Security profile: "strict" (default) or "standard"
+    #[serde(default = "default_security")]
+    security: String,
+    /// Capabilities to add back on top of the security profile
+    #[serde(default)]
+    cap_add: Vec<String>,
+    /// Capabilities to drop on top of the security profile
+    #[serde(default)]
+    cap_drop: Vec<String>,
+    /// Path to a .env file to inject into the sandbox
+    #[serde(default)]
+    env_file: Option<String>,
 }
 
 fn default_count() -> u32 { 1 }
 fn default_memory() -> u32 { 512 }
 fn default_cpus() -> u32 { 1 }
+fn default_security() -> String { "strict".to_string() }
 
 // --- Result types ---
 
@@ -120,6 +133,10 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
                 network: args.network.clone(),
                 timeout: 0,
                 runtime: args.runtime.clone(),
+                security: def.security.clone(),
+                cap_add: def.cap_add.clone(),
+                cap_drop: def.cap_drop.clone(),
+                env_file: def.env_file.clone(),
             };
 
             let info = match rt.create(create_opts, state) {

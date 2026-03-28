@@ -4,3 +4,12 @@ machines:
     memory: 1024
     cpus: 2
     provision: openclaw
+    # security: strict is the default — drops CAP_NET_RAW, CAP_SYS_PTRACE, CAP_MKNOD
+
+  - name: builder
+    count: 2
+    memory: 2048
+    cpus: 2
+    provision: web-dev
+    security: standard
+    cap_drop: [CAP_NET_RAW]

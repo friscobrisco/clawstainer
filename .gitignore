@@ -3,3 +3,6 @@
 *.lock
 .DS_Store
 CHEATSHEET.md
+vm-refactor.md
+release.md
+clawstainer-refactor.md
