@@ -6,7 +6,7 @@ const MACHINES_DIR: &str = "/var/lib/clawstainer/machines";
 
 /// Set up an overlay filesystem for a machine.
 /// Returns the path to the merged rootfs.
-pub fn setup(machine_id: &str, base_path: &PathBuf) -> Result<PathBuf> {
+pub fn setup(machine_id: &str, base_path: &PathBuf, snapshot_path: Option<&PathBuf>) -> Result<PathBuf> {
     let machine_dir = PathBuf::from(MACHINES_DIR).join(machine_id);
     let upper = machine_dir.join("upper");
     let work = machine_dir.join("work");
@@ -16,9 +16,15 @@ pub fn setup(machine_id: &str, base_path: &PathBuf) -> Result<PathBuf> {
     std::fs::create_dir_all(&work).context("Failed to create overlay work dir")?;
     std::fs::create_dir_all(&merged).context("Failed to create overlay merged dir")?;
 
+    let lowerdir = if let Some(snap) = snapshot_path {
+        format!("{}:{}", snap.display(), base_path.display())
+    } else {
+        base_path.display().to_string()
+    };
+
     let mount_opts = format!(
         "lowerdir={},upperdir={},workdir={}",
-        base_path.display(),
+        lowerdir,
         upper.display(),
         work.display()
     );

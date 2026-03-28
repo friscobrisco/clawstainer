@@ -13,7 +13,7 @@ mod state;
 
 use clap::Parser;
 
-use cli::{Cli, Commands, FleetCommands};
+use cli::{Cli, Commands, FleetCommands, SnapshotCommands};
 use error::ClawError;
 use output::CliError;
 use runtime::firecracker::FirecrackerRuntime;
@@ -70,6 +70,7 @@ fn main() {
                 commands::destroy::run(args, &rt, &state)
             }
         }
+        Commands::Cp(args) => commands::cp::run(args, &state),
         Commands::List(args) => commands::list::run(args, &state),
         Commands::Logs(args) => commands::logs::run(args),
         Commands::PortForward(args) => commands::port_forward::run(args, &state),
@@ -79,6 +80,19 @@ fn main() {
                 commands::stats::run(args, rt.as_ref(), &state)
             } else {
                 commands::stats::run_global(&args, &state)
+            }
+        }
+        Commands::Snapshot(args) => {
+            match args.command {
+                SnapshotCommands::Create(create_args) => {
+                    commands::snapshot::run_create(create_args, &state)
+                }
+                SnapshotCommands::List(list_args) => {
+                    commands::snapshot::run_list(list_args)
+                }
+                SnapshotCommands::Delete(delete_args) => {
+                    commands::snapshot::run_delete(delete_args)
+                }
             }
         }
         Commands::Fleet(args) => {

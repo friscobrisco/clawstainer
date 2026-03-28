@@ -139,14 +139,14 @@ fn install_binary_in_vm() -> Result<()> {
         .args([
             "shell", VM_NAME, "--",
             "bash", "-c",
-            "which rustc || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y)",
+            "which rustc || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y) 1>&2",
         ])
         .status();
 
     // Build inside the VM (project dir is mounted)
     let project_dir = project_dir()?;
     let build_cmd = format!(
-        "source \"$HOME/.cargo/env\" && cd '{}' && cargo build --release",
+        "source \"$HOME/.cargo/env\" && cd '{}' && cargo build --release 1>&2",
         project_dir
     );
 
@@ -200,12 +200,12 @@ fn ensure_linux_binary(project: &str, linux_binary: &str) -> Result<()> {
         .args([
             "shell", VM_NAME, "--",
             "bash", "-c",
-            "which rustc || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y)",
+            "which rustc || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y) 1>&2",
         ])
         .status();
 
     let build_cmd = format!(
-        "source \"$HOME/.cargo/env\" && cd '{}' && CARGO_TARGET_DIR=/tmp/clawstainer-target cargo build --release",
+        "source \"$HOME/.cargo/env\" && cd '{}' && CARGO_TARGET_DIR=/tmp/clawstainer-target cargo build --release 1>&2",
         project
     );
 

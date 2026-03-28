@@ -39,8 +39,63 @@ pub enum Commands {
     #[command(name = "port-forward")]
     PortForward(PortForwardArgs),
 
+    /// Copy files between host and sandbox
+    Cp(CpArgs),
+
+    /// Manage image snapshots for reusable pre-provisioned sandboxes
+    Snapshot(SnapshotArgs),
+
     /// Manage fleets of sandboxes from a YAML definition
     Fleet(FleetArgs),
+}
+
+#[derive(clap::Args)]
+pub struct CpArgs {
+    /// Source path (use MACHINE_ID:/path for sandbox paths)
+    pub src: String,
+    /// Destination path (use MACHINE_ID:/path for sandbox paths)
+    pub dst: String,
+}
+
+#[derive(clap::Args)]
+pub struct SnapshotArgs {
+    #[command(subcommand)]
+    pub command: SnapshotCommands,
+}
+
+#[derive(Subcommand)]
+pub enum SnapshotCommands {
+    /// Create a snapshot from a running sandbox
+    Create(SnapshotCreateArgs),
+
+    /// List all snapshots
+    List(SnapshotListArgs),
+
+    /// Delete a snapshot
+    Delete(SnapshotDeleteArgs),
+}
+
+#[derive(clap::Args)]
+pub struct SnapshotCreateArgs {
+    /// Machine ID to snapshot
+    pub machine_id: String,
+
+    /// Snapshot name
+    #[arg(long)]
+    pub name: String,
+}
+
+#[derive(clap::Args)]
+pub struct SnapshotListArgs {
+    /// Output format: "table" | "json"
+    #[arg(long, default_value = "table")]
+    pub format: String,
+}
+
+#[derive(clap::Args)]
+pub struct SnapshotDeleteArgs {
+    /// Snapshot name to delete
+    pub name: String,
 }
 
 #[derive(clap::Args)]
@@ -139,6 +194,10 @@ pub struct CreateArgs {
     /// Path to a .env file to inject into the sandbox (KEY=VAL format, persists until destroyed)
     #[arg(long, value_name = "PATH")]
     pub env_file: Option<String>,
+
+    /// Create from a named snapshot (reuse pre-provisioned image)
+    #[arg(long)]
+    pub from: Option<String>,
 }
 
 #[derive(clap::Args)]

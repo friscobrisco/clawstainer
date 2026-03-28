@@ -24,8 +24,18 @@ clawstainer provision <id> --components python3,git,curl
 # Open a shell
 clawstainer shell <id>
 
+# Copy files in/out of the sandbox
+clawstainer cp <id>:/root/output.txt ./local/
+clawstainer cp ./input.txt <id>:/root/
+
 # Forward a port into the sandbox
 clawstainer port-forward <id> 8080:8080
+
+# Snapshot a provisioned sandbox for reuse
+clawstainer snapshot create <id> --name python3-ready
+
+# Create a new sandbox from the snapshot (no re-provisioning needed)
+clawstainer create --name fast-box --from python3-ready
 
 # Check resource usage
 clawstainer stats <id>

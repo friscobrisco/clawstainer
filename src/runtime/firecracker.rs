@@ -276,6 +276,8 @@ impl Runtime for FirecrackerRuntime {
             timed_out: resp.get("timed_out").and_then(|v| v.as_bool()).unwrap_or(false),
             truncated: false,
             total_bytes: None,
+            peak_memory_bytes: None,
+            cpu_time_us: None,
         })
     }
 

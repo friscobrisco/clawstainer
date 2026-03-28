@@ -28,6 +28,12 @@ pub enum ClawError {
 
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
+
+    #[error("File copy failed: {0}")]
+    CopyFailed(String),
+
+    #[error("Snapshot failed: {0}")]
+    SnapshotFailed(String),
 }
 
 impl ClawError {
@@ -43,6 +49,8 @@ impl ClawError {
             Self::RuntimeUnavailable(_) => "runtime_unavailable",
             Self::ResourceLimit(_) => "resource_limit",
             Self::PermissionDenied(_) => "permission_denied",
+            Self::CopyFailed(_) => "copy_failed",
+            Self::SnapshotFailed(_) => "snapshot_failed",
         }
     }
 
@@ -58,6 +66,8 @@ impl ClawError {
             Self::RuntimeUnavailable(_) => 8,
             Self::ResourceLimit(_) => 9,
             Self::PermissionDenied(_) => 10,
+            Self::CopyFailed(_) => 11,
+            Self::SnapshotFailed(_) => 12,
         }
     }
 
@@ -69,6 +79,7 @@ impl ClawError {
             Self::RuntimeUnavailable(_) => Some("clawstainer requires Linux with systemd-nspawn"),
             Self::ExecTimeout(_) => Some("Use --timeout to increase the limit"),
             Self::ProvisionFailed(_) => Some("Check component names with 'clawstainer provision --help'"),
+            Self::CopyFailed(_) => Some("Check paths and ensure machine is running"),
             _ => None,
         }
     }

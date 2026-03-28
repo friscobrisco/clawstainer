@@ -26,6 +26,7 @@ pub struct CreateOpts {
     pub cap_add: Vec<String>,
     pub cap_drop: Vec<String>,
     pub env_file: Option<String>,
+    pub from_snapshot: Option<String>,
 }
 
 pub struct ExecOpts {
@@ -58,6 +59,10 @@ pub struct ExecResult {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_memory_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_time_us: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]

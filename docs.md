@@ -121,6 +121,11 @@ clawstainer create [OPTIONS]
 | `--network <MODE>` | string | `nat` | Network mode. `nat` gives internet access via NAT. `none` disables networking entirely |
 | `--timeout <SECONDS>` | integer | `0` | Auto-destroy the sandbox after N seconds. `0` means no timeout |
 | `--runtime <RUNTIME>` | string | `nspawn` | Runtime backend: `nspawn` or `firecracker`. Firecracker requires `/dev/kvm` |
+| `--security <PROFILE>` | string | `strict` | Security profile: `strict` drops CAP_NET_RAW, CAP_SYS_PTRACE, CAP_MKNOD and adds --no-new-privileges. `standard` uses nspawn defaults |
+| `--cap-add <CAP,...>` | string | — | Comma-separated capabilities to add back on top of the security profile |
+| `--cap-drop <CAP,...>` | string | — | Comma-separated capabilities to drop on top of the security profile |
+| `--env-file <PATH>` | string | — | Path to a .env file to inject (KEY=VAL format, persists until destroyed) |
+| `--from <SNAPSHOT>` | string | — | Create from a named snapshot (reuse pre-provisioned image) |
 
 #### Output
 
@@ -148,6 +153,18 @@ clawstainer create --name isolated --network none
 
 # Self-destructing after 1 hour
 clawstainer create --name temp --timeout 3600
+
+# Create from a snapshot (skip provisioning)
+clawstainer create --name fast-box --from python3-ready
+
+# Standard security profile (no cap drops)
+clawstainer create --name permissive --security standard
+
+# Strict profile but re-add CAP_NET_RAW
+clawstainer create --name scanner --cap-add CAP_NET_RAW
+
+# Inject environment variables from a file
+clawstainer create --name api-box --env-file .env
 ```
 
 #### Notes
@@ -201,6 +218,8 @@ clawstainer exec <MACHINE_ID> <COMMAND> [OPTIONS]
 |-------|-------------|-------------|
 | `truncated` | stdout > 1MB | Output was truncated to 1MB |
 | `total_bytes` | when truncated | Original output size in bytes |
+| `peak_memory_bytes` | nspawn runtime | Peak memory usage in bytes (from cgroup v2 `memory.peak`) |
+| `cpu_time_us` | nspawn runtime | Total CPU time in microseconds (from cgroup v2 `cpu.stat`) |
 
 #### Examples
 
@@ -552,6 +571,121 @@ clawstainer port-forward sb-a1b2c3d4 9090:3000
 
 ---
 
+### `clawstainer cp`
+
+Copy files between the host and a sandbox. Uses `machinectl copy-from` / `machinectl copy-to` under the hood, which handles recursive directory copies natively.
+
+```bash
+clawstainer cp <SRC> <DST>
+```
+
+#### Path format
+
+Use `MACHINE_ID:/path` for sandbox paths. A plain path is treated as a host path.
+
+| Direction | Syntax |
+|-----------|--------|
+| Pull (sandbox → host) | `clawstainer cp sb-abc:/root/output.txt ./local/` |
+| Push (host → sandbox) | `clawstainer cp ./file.txt sb-abc:/root/` |
+
+#### Output
+
+```json
+{
+  "machine_id": "sb-a1b2c3d4",
+  "direction": "pull",
+  "src": "/root/output.txt",
+  "dst": "./local/"
+}
+```
+
+#### Examples
+
+```bash
+# Pull a file from a sandbox
+clawstainer cp sb-a1b2c3d4:/root/results.json ./results.json
+
+# Push a file into a sandbox
+clawstainer cp ./config.yaml sb-a1b2c3d4:/root/config.yaml
+
+# Copy an entire directory
+clawstainer cp sb-a1b2c3d4:/root/project ./local-copy/
+```
+
+#### Notes
+
+- One of `src` or `dst` must be a sandbox path — you cannot copy between two sandboxes directly.
+- The sandbox must be running.
+- Handles files and directories recursively.
+
+---
+
+### `clawstainer snapshot`
+
+Manage image snapshots for reusable pre-provisioned sandboxes. Snapshots capture the overlay upper layer of a running sandbox and can be used to create new sandboxes without re-provisioning.
+
+#### `clawstainer snapshot create`
+
+```bash
+clawstainer snapshot create <MACHINE_ID> --name <NAME>
+```
+
+Creates a tarball of the sandbox's overlay upper layer and stores it in `/var/lib/clawstainer/snapshots/`.
+
+##### Output
+
+```json
+{
+  "name": "python3-ready",
+  "size_bytes": 157286400,
+  "created_at": "2026-03-27T10:30:00Z"
+}
+```
+
+#### `clawstainer snapshot list`
+
+```bash
+clawstainer snapshot list [--format json|table]
+```
+
+Lists all available snapshots with name, size, and creation time.
+
+#### `clawstainer snapshot delete`
+
+```bash
+clawstainer snapshot delete <NAME>
+```
+
+Removes a snapshot tarball and any extracted directory.
+
+#### Workflow
+
+```bash
+# 1. Create and provision a sandbox
+clawstainer create --name base-box --memory 1024
+clawstainer provision sb-xxx --components python3,git
+
+# 2. Snapshot it
+clawstainer snapshot create sb-xxx --name python3-git
+
+# 3. Create new sandboxes from the snapshot — packages are already installed
+clawstainer create --name worker-1 --from python3-git
+clawstainer create --name worker-2 --from python3-git
+
+# 4. Manage snapshots
+clawstainer snapshot list
+clawstainer snapshot delete python3-git
+```
+
+#### How it works
+
+- `snapshot create` tars the overlay upper layer (`/var/lib/clawstainer/machines/{id}/upper/`)
+- `create --from` extracts the snapshot and uses it as an additional overlay lower layer: `lowerdir=snapshot:base-image`
+- OverlayFS supports multiple lowers — the snapshot layer sits between the base image and the new writable upper layer
+- Snapshots are filesystem-only; no state.json changes are needed
+
+---
+
 ### `clawstainer fleet`
 
 Manage fleets of sandboxes from a YAML definition. Fleet create uses a two-pass approach: creates all machines first, then provisions them in parallel batches.
@@ -646,6 +780,8 @@ All errors are returned as JSON to stderr with a non-zero exit code:
 | 8 | `runtime_unavailable` | Linux/nspawn not available |
 | 9 | `resource_limit` | Host resources exhausted |
 | 10 | `permission_denied` | Needs root or wrong group |
+| 11 | `copy_failed` | File copy operation failed |
+| 12 | `snapshot_failed` | Snapshot operation failed |
 
 ---
 
@@ -719,6 +855,9 @@ The difference is how sandboxes connect to the bridge:
 /var/lib/clawstainer/
 ├── base-images/
 │   └── ubuntu-24.04/       # Shared read-only base image (directory)
+├── snapshots/
+│   ├── python3-ready.tar.gz  # Snapshot tarballs
+│   └── python3-ready/        # Extracted snapshot (created on first use)
 ├── firecracker/
 │   ├── bin/firecracker      # Firecracker binary (auto-downloaded)
 │   ├── bin/claw-agent       # Guest agent binary

@@ -137,6 +137,7 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
                 cap_add: def.cap_add.clone(),
                 cap_drop: def.cap_drop.clone(),
                 env_file: def.env_file.clone(),
+                from_snapshot: None,
             };
 
             let info = match rt.create(create_opts, state) {

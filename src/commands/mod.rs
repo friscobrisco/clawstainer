@@ -1,3 +1,4 @@
+pub mod cp;
 pub mod create;
 pub mod destroy;
 pub mod exec;
@@ -7,4 +8,5 @@ pub mod logs;
 pub mod port_forward;
 pub mod provision;
 pub mod shell;
+pub mod snapshot;
 pub mod stats;

@@ -87,8 +87,15 @@ impl Runtime for NspawnRuntime {
         // Ensure base image exists
         let base_path = image::bootstrap::ensure_base_image()?;
 
+        // Extract snapshot if creating from one
+        let snapshot_dir = if let Some(ref snap_name) = opts.from_snapshot {
+            Some(image::snapshot::extract(snap_name)?)
+        } else {
+            None
+        };
+
         // Setup overlay filesystem
-        let root_path = image::overlay::setup(&id, &base_path)?;
+        let root_path = image::overlay::setup(&id, &base_path, snapshot_dir.as_ref())?;
 
         // Allocate IP if networking is enabled
         let ip = if opts.network == "nat" {
@@ -278,6 +285,8 @@ impl Runtime for NspawnRuntime {
             stderr.truncate(MAX_OUTPUT_BYTES);
         }
 
+        let (peak_memory_bytes, cpu_time_us) = read_cgroup_stats(machine_id);
+
         Ok(ExecResult {
             machine_id: machine_id.to_string(),
             exit_code: output.status.code().unwrap_or(-1),
@@ -287,6 +296,8 @@ impl Runtime for NspawnRuntime {
             timed_out,
             truncated,
             total_bytes,
+            peak_memory_bytes,
+            cpu_time_us,
         })
     }
 
@@ -542,4 +553,25 @@ fn inject_env_file(machine_id: &str, env_file_path: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn read_cgroup_stats(machine_id: &str) -> (Option<u64>, Option<u64>) {
+    let escaped_id = machine_id.replace('-', "\\x2d");
+    let cgroup_base = format!(
+        "/sys/fs/cgroup/machine.slice/machine-{}.scope",
+        escaped_id
+    );
+    let peak_memory = std::fs::read_to_string(format!("{}/memory.peak", cgroup_base))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok());
+    let cpu_time = std::fs::read_to_string(format!("{}/cpu.stat", cgroup_base))
+        .ok()
+        .and_then(|content| {
+            content
+                .lines()
+                .find(|l| l.starts_with("usage_usec"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+        });
+    (peak_memory, cpu_time)
 }

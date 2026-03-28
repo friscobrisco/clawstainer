@@ -26,6 +26,8 @@ mod tests {
             timed_out: false,
             truncated: false,
             total_bytes: None,
+            peak_memory_bytes: None,
+            cpu_time_us: None,
         }
     }
 
