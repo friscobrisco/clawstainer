@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::error::ClawError;
 use crate::image;
@@ -10,8 +10,8 @@ use crate::state::{Machine, StateStore};
 use std::collections::HashSet;
 
 use super::{
-    require_linux, CreateOpts, DestroyResult, ExecOpts, ExecResult, MachineInfo, MachineStatus,
-    Runtime,
+    generate_id, generate_name, poll_with_backoff, require_linux, CreateOpts, DestroyResult,
+    ExecOpts, ExecResult, MachineInfo, MachineStatus, Runtime,
 };
 
 const MAX_OUTPUT_BYTES: usize = 1_048_576; // 1MB
@@ -52,37 +52,15 @@ impl NspawnRuntime {
         caps
     }
 
-    fn generate_id() -> String {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let hex: u32 = rng.gen();
-        format!("sb-{:08x}", hex)
-    }
-
-    fn generate_name() -> String {
-        use rand::seq::SliceRandom;
-        let adjectives = [
-            "bold", "calm", "dark", "fast", "keen", "loud", "neat", "pale", "quick", "shy",
-            "slim", "warm", "wise", "cool", "bright",
-        ];
-        let animals = [
-            "parrot", "falcon", "otter", "panda", "raven", "tiger", "whale", "zebra", "eagle",
-            "koala", "lynx", "moose", "newt", "owl", "fox",
-        ];
-        let mut rng = rand::thread_rng();
-        let adj = adjectives.choose(&mut rng).unwrap();
-        let animal = animals.choose(&mut rng).unwrap();
-        format!("{adj}-{animal}")
-    }
 }
 
 impl Runtime for NspawnRuntime {
     fn create(&self, opts: CreateOpts, state: &StateStore) -> Result<MachineInfo> {
         require_linux()?;
 
-        let id = Self::generate_id();
+        let id = generate_id();
         let caps_to_drop = Self::resolve_caps_to_drop(&opts);
-        let name = opts.name.unwrap_or_else(Self::generate_name);
+        let name = opts.name.unwrap_or_else(generate_name);
 
         // Ensure base image exists
         let base_path = image::bootstrap::ensure_base_image()?;
@@ -103,7 +81,7 @@ impl Runtime for NspawnRuntime {
             network::bridge::ensure_bridge()?;
             network::nat::ensure_nat()?;
             let allocated_ip = state.with_lock(|s| {
-                let ip = network::ipam::allocate(&mut s.network)?;
+                let ip = network::ipam::allocate(&mut s.network, &id)?;
                 Ok(ip)
             })?;
             Some(allocated_ip)
@@ -149,22 +127,17 @@ impl Runtime for NspawnRuntime {
         let pid = child.id();
         let now = chrono::Utc::now();
 
-        // Wait for machine to become ready and D-Bus to be available
-        wait_for_machine_ready(&id)?;
+        // Wait for machine to be fully ready
+        let needs_exec = ip.is_some() || opts.env_file.is_some();
+        wait_for_machine_fully_ready(&id, needs_exec)?;
 
         // If we have an IP, configure it inside the container
         if let Some(ref ip) = ip {
-            // Wait a bit more for systemd inside the container to fully initialize
-            wait_for_exec_ready(&id)?;
             configure_container_network(&id, ip)?;
         }
 
         // Inject env file if provided
         let has_env_file = if let Some(ref env_file_path) = opts.env_file {
-            if ip.is_none() {
-                // If we didn't configure networking, we still need exec readiness
-                wait_for_exec_ready(&id)?;
-            }
             inject_env_file(&id, env_file_path)?;
             true
         } else {
@@ -337,40 +310,50 @@ impl Runtime for NspawnRuntime {
             .args(["poweroff", machine_id])
             .output();
 
-        // Wait up to 5 seconds
-        for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            let output = Command::new("machinectl")
-                .args(["show", machine_id, "--property=State"])
-                .output();
-            match output {
-                Ok(o) => {
-                    let state_str = String::from_utf8_lossy(&o.stdout);
-                    if state_str.contains("State=") && !state_str.contains("running") {
-                        break;
-                    }
-                }
-                Err(_) => break, // Machine already gone
-            }
-        }
+        // Wait for shutdown with exponential backoff
+        let destroy_id = machine_id.to_string();
+        let _ = poll_with_backoff(
+            || {
+                Command::new("machinectl")
+                    .args(["show", &destroy_id, "--property=State"])
+                    .output()
+                    .map(|o| {
+                        let s = String::from_utf8_lossy(&o.stdout);
+                        s.contains("State=") && !s.contains("running")
+                    })
+                    .unwrap_or(true) // Machine already gone
+            },
+            Duration::from_millis(100),
+            Duration::from_secs(1),
+            Duration::from_secs(5),
+            "Timed out waiting for machine shutdown",
+        );
 
         // Force terminate if still running
         let _ = Command::new("machinectl")
             .args(["terminate", machine_id])
             .output();
 
-        // Clean up overlay
-        let _ = image::overlay::teardown(machine_id);
+        // Clean up overlay — if this fails, mark as failed instead of removing
+        let cleanup_failed = image::overlay::teardown(machine_id).is_err();
 
-        // Release IP and remove from state
         state.with_lock(|s| {
-            if let Some(m) = s.machines.remove(machine_id) {
-                if let Some(ref ip) = m.ip {
-                    network::ipam::release(&mut s.network, ip);
+            if cleanup_failed {
+                // Mark as failed so the user can investigate
+                if let Some(m) = s.machines.get_mut(machine_id) {
+                    m.status = "failed".to_string();
+                }
+            } else {
+                // Cleanup succeeded — remove from state and release IP
+                if let Some(m) = s.machines.remove(machine_id) {
+                    if let Some(ref ip) = m.ip {
+                        network::ipam::release(&mut s.network, ip);
+                    }
                 }
             }
-            // If no machines left, tear down bridge
-            if s.machines.is_empty() {
+            // If no running machines left, tear down bridge
+            let has_running = s.machines.values().any(|m| m.status == "running");
+            if !has_running {
                 let _ = network::bridge::remove_bridge();
                 let _ = network::nat::remove_nat();
             }
@@ -414,53 +397,57 @@ impl Runtime for NspawnRuntime {
 }
 
 fn wait_for_machine_ready(machine_id: &str) -> Result<()> {
-    for i in 0..30 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let output = Command::new("machinectl")
-            .args(["show", machine_id, "--property=State"])
-            .output();
-        if let Ok(o) = output {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            if stdout.contains("State=running") {
-                return Ok(());
-            }
-        }
-        if i == 29 {
-            return Err(ClawError::CreateFailed(
-                format!("Timed out waiting for machine {machine_id} to become ready")
-            ).into());
-        }
-    }
+    let id = machine_id.to_string();
+    poll_with_backoff(
+        || {
+            Command::new("machinectl")
+                .args(["show", &id, "--property=State"])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains("State=running"))
+                .unwrap_or(false)
+        },
+        Duration::from_millis(50),
+        Duration::from_secs(1),
+        Duration::from_secs(10),
+        &format!("Timed out waiting for machine {machine_id} to become ready"),
+    )
+    .map_err(|e| ClawError::CreateFailed(e.to_string()))?;
     Ok(())
 }
 
 fn wait_for_exec_ready(machine_id: &str) -> Result<()> {
-    // Wait until we can successfully execute a command inside the container.
-    // This ensures D-Bus and systemd are fully initialized.
-    for i in 0..50 {
-        let output = Command::new("systemd-run")
-            .args([
-                &format!("--machine={machine_id}"),
-                "--wait",
-                "--pipe",
-                "--collect",
-                "--",
-                "true",
-            ])
-            .output();
+    let id = machine_id.to_string();
+    poll_with_backoff(
+        || {
+            Command::new("systemd-run")
+                .args([
+                    &format!("--machine={id}"),
+                    "--wait",
+                    "--pipe",
+                    "--collect",
+                    "--",
+                    "true",
+                ])
+                .output()
+                .ok()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        },
+        Duration::from_millis(50),
+        Duration::from_secs(1),
+        Duration::from_secs(10),
+        &format!("Timed out waiting for exec readiness in machine {machine_id}"),
+    )
+    .map_err(|e| ClawError::CreateFailed(e.to_string()))?;
+    Ok(())
+}
 
-        if let Ok(o) = output {
-            if o.status.success() {
-                return Ok(());
-            }
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        if i == 49 {
-            return Err(ClawError::CreateFailed(
-                format!("Timed out waiting for exec readiness in machine {machine_id}")
-            ).into());
-        }
+/// Wait for machine to be fully ready for use (running + exec ready if needed).
+fn wait_for_machine_fully_ready(machine_id: &str, needs_exec: bool) -> Result<()> {
+    wait_for_machine_ready(machine_id)?;
+    if needs_exec {
+        wait_for_exec_ready(machine_id)?;
     }
     Ok(())
 }

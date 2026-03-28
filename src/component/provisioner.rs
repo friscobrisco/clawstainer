@@ -29,7 +29,8 @@ impl Provisioner {
         let mut results = Vec::new();
 
         for name in &resolved {
-            let def = self.components_file.components.get(name).unwrap();
+            let def = self.components_file.components.get(name)
+                .ok_or_else(|| anyhow::anyhow!("Unknown component: {name}"))?;
             let start = Instant::now();
 
             let component_timeout = def.timeout.unwrap_or(timeout);

@@ -173,12 +173,13 @@ fn install_binary_in_vm() -> Result<()> {
 
 /// Build the Linux binary inside the VM if needed
 fn ensure_linux_binary(project: &str, linux_binary: &str) -> Result<()> {
-    // Check if binary exists and is newer than source files
+    // Quick check: compare a build timestamp file against source modification times.
+    // This avoids expensive `find -newer` traversals on every invocation.
+    let ts_file = format!("{}/target/.clawstainer-build-ts", project);
     let check_cmd = format!(
-        "test -f '{}' && \
-         ! find '{}/src' '{}/Cargo.toml' '{}/Cargo.lock' '{}/components.yaml' '{}/build.rs' \
-         -newer '{}' 2>/dev/null | grep -q .",
-        linux_binary, project, project, project, project, project, linux_binary
+        "test -f '{linux_binary}' && test -f '{ts_file}' && \
+         [ \"$(stat -c %Y '{ts_file}' 2>/dev/null || stat -f %m '{ts_file}')\" -ge \
+           \"$(stat -c %Y '{project}/src/main.rs' 2>/dev/null || stat -f %m '{project}/src/main.rs')\" ]"
     );
     let check = Command::new("limactl")
         .args([
@@ -220,6 +221,12 @@ fn ensure_linux_binary(project: &str, linux_binary: &str) -> Result<()> {
     if !status.success() {
         anyhow::bail!("Failed to build clawstainer for Linux");
     }
+
+    // Write build timestamp so subsequent checks are fast
+    let ts_file = format!("{}/target/.clawstainer-build-ts", project);
+    let _ = Command::new("limactl")
+        .args(["shell", VM_NAME, "--", "touch", &ts_file])
+        .status();
 
     Ok(())
 }

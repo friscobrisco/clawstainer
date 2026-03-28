@@ -73,7 +73,7 @@ impl Runtime for FirecrackerRuntime {
             network::bridge::ensure_bridge()?;
             network::nat::ensure_nat()?;
             let allocated_ip = state.with_lock(|s| {
-                let ip = network::ipam::allocate(&mut s.network)?;
+                let ip = network::ipam::allocate(&mut s.network, &id)?;
                 Ok(ip)
             })?;
 

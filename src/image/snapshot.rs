@@ -36,14 +36,15 @@ pub fn create(machine_id: &str, name: &str) -> Result<SnapshotInfo> {
         .into());
     }
 
+    let tarball_str = tarball
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Snapshot path contains invalid UTF-8"))?;
+    let upper_str = upper_dir
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Upper dir path contains invalid UTF-8"))?;
+
     let status = Command::new("tar")
-        .args([
-            "-czf",
-            tarball.to_str().unwrap(),
-            "-C",
-            upper_dir.to_str().unwrap(),
-            ".",
-        ])
+        .args(["-czf", tarball_str, "-C", upper_str, "."])
         .status()
         .context("Failed to run tar")?;
 
@@ -55,9 +56,9 @@ pub fn create(machine_id: &str, name: &str) -> Result<SnapshotInfo> {
     let created_at = meta
         .modified()
         .ok()
-        .and_then(|t| {
+        .map(|t| {
             let dt: chrono::DateTime<chrono::Utc> = t.into();
-            Some(dt.to_rfc3339())
+            dt.to_rfc3339()
         })
         .unwrap_or_default();
 
@@ -95,9 +96,9 @@ pub fn list() -> Result<Vec<SnapshotInfo>> {
             let created_at = meta
                 .modified()
                 .ok()
-                .and_then(|t| {
+                .map(|t| {
                     let dt: chrono::DateTime<chrono::Utc> = t.into();
-                    Some(dt.to_rfc3339())
+                    dt.to_rfc3339()
                 })
                 .unwrap_or_default();
 
@@ -143,13 +144,15 @@ pub fn extract(name: &str) -> Result<PathBuf> {
 
     std::fs::create_dir_all(&extracted).context("Failed to create snapshot extract dir")?;
 
+    let tarball_str = tarball
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Snapshot tarball path contains invalid UTF-8"))?;
+    let extracted_str = extracted
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Snapshot extract path contains invalid UTF-8"))?;
+
     let status = Command::new("tar")
-        .args([
-            "-xzf",
-            tarball.to_str().unwrap(),
-            "-C",
-            extracted.to_str().unwrap(),
-        ])
+        .args(["-xzf", tarball_str, "-C", extracted_str])
         .status()
         .context("Failed to extract snapshot")?;
 

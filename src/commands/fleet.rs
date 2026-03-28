@@ -88,31 +88,35 @@ struct PendingProvision {
     result_index: usize,
 }
 
-// --- Fleet Create ---
+// --- Fleet Config Parsing ---
 
-pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
-    // Read and parse fleet YAML
-    let yaml_content = std::fs::read_to_string(&args.file)
-        .with_context(|| format!("Failed to read fleet file: {}", args.file))?;
-    let fleet: FleetFile = serde_yaml::from_str(&yaml_content)
-        .with_context(|| format!("Failed to parse fleet file: {}", args.file))?;
+fn parse_fleet_config(file_path: &str) -> Result<FleetFile> {
+    let yaml_content = std::fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read fleet file: {file_path}"))?;
+    serde_yaml::from_str(&yaml_content)
+        .with_context(|| format!("Failed to parse fleet file: {file_path}"))
+}
 
-    // Calculate total machine count
-    let total: u32 = fleet.machines.iter().map(|d| d.count).sum();
-    if total == 0 {
-        eprintln!("No machines defined in fleet file.");
-        return Ok(());
-    }
+// --- Pass 1: Machine Creation ---
 
+struct CreatePassResult {
+    results: Vec<FleetMachineResult>,
+    pending_provisions: Vec<PendingProvision>,
+    created: u32,
+    failed: u32,
+}
+
+fn create_fleet_machines(
+    fleet: &FleetFile,
+    args: &FleetCreateArgs,
+    state: &StateStore,
+    total: u32,
+) -> CreatePassResult {
     let mut results: Vec<FleetMachineResult> = Vec::new();
     let mut pending_provisions: Vec<PendingProvision> = Vec::new();
     let mut created: u32 = 0;
     let mut failed: u32 = 0;
     let mut current: u32 = 0;
-
-    // ── Pass 1: Create all machines ──
-    eprintln!("=== Creating {} machines ===", total);
-    eprintln!();
 
     for def in &fleet.machines {
         for index in 0..def.count {
@@ -163,12 +167,12 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
             // Set fleet_name in state
             let fleet_group = def.name.clone();
             let machine_id = info.id.clone();
-            state.with_lock(|s| {
+            let _ = state.with_lock(|s| {
                 if let Some(m) = s.machines.get_mut(&machine_id) {
                     m.fleet_name = Some(fleet_group);
                 }
                 Ok(())
-            })?;
+            });
 
             created += 1;
             let result_index = results.len();
@@ -194,33 +198,32 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
         }
     }
 
-    // ── Pass 2: Provision machines ──
-    if pending_provisions.is_empty() {
-        eprintln!();
-        eprintln!("Fleet ready: {} created, {} failed, no provisioning needed", created, failed);
-        output::print_json(&FleetCreateResult {
-            fleet: results,
-            total,
-            created,
-            provisioned: 0,
-            failed,
-        });
-        return Ok(());
+    CreatePassResult {
+        results,
+        pending_provisions,
+        created,
+        failed,
     }
+}
 
+// --- Pass 2: Provisioning ---
+
+fn provision_fleet_machines(
+    pending_provisions: Vec<PendingProvision>,
+    results: Vec<FleetMachineResult>,
+    parallel: usize,
+) -> (Vec<FleetMachineResult>, u32, u32) {
     let prov_total = pending_provisions.len();
-    let parallel = if args.parallel == 0 { 1 } else { args.parallel };
+    let parallel = if parallel == 0 { 1 } else { parallel };
 
     eprintln!();
     eprintln!("=== Provisioning {} machines (parallel: {}) ===", prov_total, parallel);
     eprintln!();
 
-    // Shared state for parallel provisioning
     let results = Arc::new(Mutex::new(results));
     let provisioned_count = Arc::new(Mutex::new(0u32));
     let prov_failed_count = Arc::new(Mutex::new(0u32));
 
-    // Process in chunks of `parallel`
     for chunk in pending_provisions.chunks(parallel) {
         let mut handles = Vec::new();
 
@@ -251,7 +254,6 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
 
                 let rt = crate::make_runtime(&runtime_name);
 
-                // We need a StateStore for provisioning — create a fresh one
                 let prov_state = match StateStore::new() {
                     Ok(s) => s,
                     Err(e) => {
@@ -316,13 +318,70 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
 
         // Wait for this chunk to finish before starting next
         for handle in handles {
-            let _ = handle.join();
+            match handle.join() {
+                Ok(()) => {}
+                Err(panic_info) => {
+                    // Thread panicked — log and count as failure
+                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    eprintln!("  Provisioning thread panicked: {}", msg);
+                    *prov_failed_count.lock().unwrap() += 1;
+                }
+            }
         }
     }
 
-    let results = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
+    // Safely unwrap the Arc — all threads have joined at this point
+    let results = match Arc::try_unwrap(results) {
+        Ok(mutex) => mutex.into_inner().unwrap_or_else(|e| e.into_inner()),
+        Err(arc) => arc.lock().unwrap().clone(),
+    };
     let provisioned = *provisioned_count.lock().unwrap();
     let prov_failed = *prov_failed_count.lock().unwrap();
+
+    (results, provisioned, prov_failed)
+}
+
+// --- Fleet Create ---
+
+pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
+    let fleet = parse_fleet_config(&args.file)?;
+
+    let total: u32 = fleet.machines.iter().map(|d| d.count).sum();
+    if total == 0 {
+        eprintln!("No machines defined in fleet file.");
+        return Ok(());
+    }
+
+    // ── Pass 1: Create all machines ──
+    eprintln!("=== Creating {} machines ===", total);
+    eprintln!();
+
+    let pass1 = create_fleet_machines(&fleet, &args, state, total);
+    let created = pass1.created;
+    let failed = pass1.failed;
+
+    // ── Pass 2: Provision machines ──
+    if pass1.pending_provisions.is_empty() {
+        eprintln!();
+        eprintln!("Fleet ready: {} created, {} failed, no provisioning needed", created, failed);
+        output::print_json(&FleetCreateResult {
+            fleet: pass1.results,
+            total,
+            created,
+            provisioned: 0,
+            failed,
+        });
+        return Ok(());
+    }
+
+    let (results, provisioned, prov_failed) =
+        provision_fleet_machines(pass1.pending_provisions, pass1.results, args.parallel);
 
     // Summary
     eprintln!();
@@ -340,6 +399,97 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_fleet_config_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet.yaml");
+        std::fs::write(&path, r#"
+machines:
+  - name: web
+    count: 3
+    memory: 1024
+    cpus: 2
+    provision: nodejs
+  - name: worker
+    count: 1
+"#).unwrap();
+
+        let fleet = parse_fleet_config(path.to_str().unwrap()).unwrap();
+        assert_eq!(fleet.machines.len(), 2);
+        assert_eq!(fleet.machines[0].name, "web");
+        assert_eq!(fleet.machines[0].count, 3);
+        assert_eq!(fleet.machines[0].memory, 1024);
+        assert_eq!(fleet.machines[0].cpus, 2);
+        assert_eq!(fleet.machines[0].provision, Some("nodejs".to_string()));
+        assert_eq!(fleet.machines[1].name, "worker");
+        assert_eq!(fleet.machines[1].count, 1);
+        assert_eq!(fleet.machines[1].memory, 512); // default
+        assert_eq!(fleet.machines[1].cpus, 1); // default
+    }
+
+    #[test]
+    fn test_parse_fleet_config_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet.yaml");
+        std::fs::write(&path, r#"
+machines:
+  - name: minimal
+"#).unwrap();
+
+        let fleet = parse_fleet_config(path.to_str().unwrap()).unwrap();
+        let m = &fleet.machines[0];
+        assert_eq!(m.count, 1);
+        assert_eq!(m.memory, 512);
+        assert_eq!(m.cpus, 1);
+        assert_eq!(m.security, "strict");
+        assert!(m.provision.is_none());
+        assert!(m.cap_add.is_empty());
+        assert!(m.cap_drop.is_empty());
+        assert!(m.env_file.is_none());
+    }
+
+    #[test]
+    fn test_parse_fleet_config_invalid_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet.yaml");
+        std::fs::write(&path, "not: [valid: fleet").unwrap();
+
+        let result = parse_fleet_config(path.to_str().unwrap());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_fleet_config_missing_file() {
+        let result = parse_fleet_config("/nonexistent/fleet.yaml");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_fleet_config_security_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet.yaml");
+        std::fs::write(&path, r#"
+machines:
+  - name: secure
+    security: strict
+    cap_drop: ["CAP_NET_RAW"]
+  - name: relaxed
+    security: standard
+    cap_add: ["CAP_SYS_PTRACE"]
+"#).unwrap();
+
+        let fleet = parse_fleet_config(path.to_str().unwrap()).unwrap();
+        assert_eq!(fleet.machines[0].security, "strict");
+        assert_eq!(fleet.machines[0].cap_drop, vec!["CAP_NET_RAW"]);
+        assert_eq!(fleet.machines[1].security, "standard");
+        assert_eq!(fleet.machines[1].cap_add, vec!["CAP_SYS_PTRACE"]);
+    }
 }
 
 // --- Fleet Destroy ---
