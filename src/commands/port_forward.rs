@@ -9,19 +9,7 @@ pub fn run(args: PortForwardArgs, state: &StateStore) -> Result<()> {
     // Parse port mapping
     let (host_port, sandbox_port) = parse_port(&args.port)?;
 
-    // Get machine IP
-    let ip = state.with_read_lock(|s| {
-        let machine = s.machines.get(&args.machine_id)
-            .ok_or_else(|| ClawError::MachineNotFound(args.machine_id.clone()))?;
-        if machine.status != "running" {
-            return Err(ClawError::MachineNotRunning(
-                args.machine_id.clone(),
-                machine.status.clone(),
-            ).into());
-        }
-        machine.ip.clone()
-            .ok_or_else(|| ClawError::ExecFailed("Machine has no IP (network=none)".to_string()).into())
-    })?;
+    let ip = state.get_machine_ip(&args.machine_id)?;
 
     // Add DNAT rule: forward host_port -> sandbox_ip:sandbox_port
     let status = Command::new("iptables")

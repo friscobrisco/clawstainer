@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::error::ClawError;
 use crate::network::NetworkState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +130,34 @@ impl StateStore {
 
         lock.unlock()?;
         Ok(result)
+    }
+
+    pub fn get_machine(&self, machine_id: &str) -> Result<Machine> {
+        self.with_read_lock(|s| {
+            s.machines
+                .get(machine_id)
+                .cloned()
+                .ok_or_else(|| ClawError::MachineNotFound(machine_id.to_string()).into())
+        })
+    }
+
+    pub fn get_running_machine(&self, machine_id: &str) -> Result<Machine> {
+        let machine = self.get_machine(machine_id)?;
+        if machine.status != "running" {
+            return Err(ClawError::MachineNotRunning(
+                machine_id.to_string(),
+                machine.status.clone(),
+            )
+            .into());
+        }
+        Ok(machine)
+    }
+
+    pub fn get_machine_ip(&self, machine_id: &str) -> Result<String> {
+        let machine = self.get_running_machine(machine_id)?;
+        machine
+            .ip
+            .ok_or_else(|| ClawError::ExecFailed("Machine has no IP (network=none)".to_string()).into())
     }
 }
 
@@ -265,5 +294,88 @@ mod tests {
         assert_eq!(state.version, 1);
         assert_eq!(state.machines.len(), 1);
         assert_eq!(state.network.next_octet, 3);
+    }
+
+    #[test]
+    fn test_get_machine_returns_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::with_base_dir(dir.path().to_path_buf()).unwrap();
+
+        store.with_lock(|s| {
+            s.machines.insert("sb-test".to_string(), test_machine("sb-test"));
+            Ok(())
+        }).unwrap();
+
+        let machine = store.get_machine("sb-test").unwrap();
+        assert_eq!(machine.id, "sb-test");
+    }
+
+    #[test]
+    fn test_get_machine_returns_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::with_base_dir(dir.path().to_path_buf()).unwrap();
+
+        let err = store.get_machine("sb-missing").unwrap_err();
+        assert!(err.to_string().contains("No machine with ID 'sb-missing'"));
+    }
+
+    #[test]
+    fn test_get_running_machine_returns_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::with_base_dir(dir.path().to_path_buf()).unwrap();
+
+        store.with_lock(|s| {
+            s.machines.insert("sb-test".to_string(), test_machine("sb-test"));
+            Ok(())
+        }).unwrap();
+
+        let machine = store.get_running_machine("sb-test").unwrap();
+        assert_eq!(machine.status, "running");
+    }
+
+    #[test]
+    fn test_get_running_machine_rejects_stopped_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::with_base_dir(dir.path().to_path_buf()).unwrap();
+
+        store.with_lock(|s| {
+            let mut machine = test_machine("sb-test");
+            machine.status = "stopped".to_string();
+            s.machines.insert("sb-test".to_string(), machine);
+            Ok(())
+        }).unwrap();
+
+        let err = store.get_running_machine("sb-test").unwrap_err();
+        assert!(err.to_string().contains("is not running"));
+    }
+
+    #[test]
+    fn test_get_machine_ip_returns_ip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::with_base_dir(dir.path().to_path_buf()).unwrap();
+
+        store.with_lock(|s| {
+            s.machines.insert("sb-test".to_string(), test_machine("sb-test"));
+            Ok(())
+        }).unwrap();
+
+        let ip = store.get_machine_ip("sb-test").unwrap();
+        assert_eq!(ip, "10.0.0.2");
+    }
+
+    #[test]
+    fn test_get_machine_ip_rejects_machine_without_ip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::with_base_dir(dir.path().to_path_buf()).unwrap();
+
+        store.with_lock(|s| {
+            let mut machine = test_machine("sb-test");
+            machine.ip = None;
+            s.machines.insert("sb-test".to_string(), machine);
+            Ok(())
+        }).unwrap();
+
+        let err = store.get_machine_ip("sb-test").unwrap_err();
+        assert!(err.to_string().contains("Machine has no IP"));
     }
 }

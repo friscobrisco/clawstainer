@@ -10,6 +10,7 @@ use std::process::Command;
 
 const VM_NAME: &str = "clawstainer";
 const LIMA_CONFIG: &str = include_str!("../lima-clawstainer.yaml");
+const PROJECT_DIR_PLACEHOLDER: &str = "__PROJECT_DIR__";
 
 /// Check if we're on macOS and need to proxy through Lima
 pub fn needs_proxy() -> bool {
@@ -100,7 +101,9 @@ fn ensure_vm_running() -> Result<()> {
 fn create_vm() -> Result<()> {
     // Write config to temp file
     let config_path = std::env::temp_dir().join("clawstainer-lima.yaml");
-    std::fs::write(&config_path, LIMA_CONFIG)
+    let project_dir = project_dir()?;
+    let config = LIMA_CONFIG.replace(PROJECT_DIR_PLACEHOLDER, &project_dir);
+    std::fs::write(&config_path, config)
         .context("Failed to write Lima config")?;
 
     let status = Command::new("limactl")
