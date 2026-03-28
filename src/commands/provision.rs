@@ -22,6 +22,19 @@ pub fn run(args: ProvisionArgs, runtime: &dyn Runtime, state: &StateStore) -> Re
 
     let provisioner = Provisioner::new()?;
     let results = provisioner.provision(&args.machine_id, &component_names, args.timeout, runtime, state)?;
-    output::print_json(&results);
+
+    if output::resolve_format(&args.format) == "json" {
+        output::print_json(&results);
+    } else {
+        println!("{:<20} {:<10} {:>10}", "COMPONENT", "STATUS", "DURATION");
+        for r in &results.results {
+            println!(
+                "{:<20} {:<10} {:>8.1}s",
+                r.component,
+                r.status,
+                r.duration_ms as f64 / 1000.0
+            );
+        }
+    }
     Ok(())
 }

@@ -370,13 +370,14 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
     if pass1.pending_provisions.is_empty() {
         eprintln!();
         eprintln!("Fleet ready: {} created, {} failed, no provisioning needed", created, failed);
-        output::print_json(&FleetCreateResult {
+        let result = FleetCreateResult {
             fleet: pass1.results,
             total,
             created,
             provisioned: 0,
             failed,
-        });
+        };
+        print_fleet_create_result(&result, &args.format);
         return Ok(());
     }
 
@@ -390,15 +391,37 @@ pub fn run_create(args: FleetCreateArgs, state: &StateStore) -> Result<()> {
         created, provisioned, failed + prov_failed
     );
 
-    output::print_json(&FleetCreateResult {
+    let result = FleetCreateResult {
         fleet: results,
         total,
         created,
         provisioned,
         failed: failed + prov_failed,
-    });
+    };
+    print_fleet_create_result(&result, &args.format);
 
     Ok(())
+}
+
+fn print_fleet_create_result(result: &FleetCreateResult, format: &str) {
+    if output::resolve_format(format) == "json" {
+        output::print_json(result);
+    } else {
+        println!(
+            "{:<16} {:<14} {:<10} {:<12} {}",
+            "NAME", "ID", "STATUS", "PROVISION", "IP"
+        );
+        for m in &result.fleet {
+            println!(
+                "{:<16} {:<14} {:<10} {:<12} {}",
+                m.name,
+                m.id.as_deref().unwrap_or("-"),
+                m.status,
+                m.provision_status.as_deref().unwrap_or("-"),
+                m.ip.as_deref().unwrap_or("-")
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -542,11 +565,18 @@ pub fn run_destroy(args: FleetDestroyArgs, state: &StateStore) -> Result<()> {
     eprintln!();
     eprintln!("Fleet destroy: {} destroyed, {} failed", destroyed, failed);
 
-    output::print_json(&FleetDestroyResult {
+    let result = FleetDestroyResult {
         destroyed,
         failed,
         machines: destroyed_ids,
-    });
+    };
+    if output::resolve_format(&args.format) == "json" {
+        output::print_json(&result);
+    } else {
+        for id in &result.machines {
+            println!("Destroyed {}", id);
+        }
+    }
 
     Ok(())
 }

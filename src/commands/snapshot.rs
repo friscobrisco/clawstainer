@@ -16,7 +16,7 @@ pub fn run_create(args: SnapshotCreateArgs, state: &StateStore) -> Result<()> {
 pub fn run_list(args: SnapshotListArgs) -> Result<()> {
     let snapshots = image::snapshot::list()?;
 
-    if args.format == "json" {
+    if output::resolve_format(&args.format) == "json" {
         output::print_json(&snapshots);
     } else {
         if snapshots.is_empty() {

@@ -1,6 +1,6 @@
 # clawstainer — AI Agent Skills Reference
 
-Machine-readable reference for AI agents using clawstainer sandboxes. All commands return structured JSON to stdout. Errors go to stderr as JSON with a non-zero exit code.
+Machine-readable reference for AI agents using clawstainer sandboxes. All commands default to `--format auto`: JSON when piped (typical agent usage), table in interactive terminals. Pass `--format json` explicitly to guarantee JSON output. Errors go to stderr as JSON with a non-zero exit code.
 
 ---
 
@@ -25,8 +25,9 @@ clawstainer create [OPTIONS]
 | `--cap-drop <CAP,...>` | — | Drop additional capabilities |
 | `--env-file <PATH>` | — | Inject KEY=VAL pairs from file |
 | `--from <SNAPSHOT>` | — | Create from a named snapshot |
+| `--format <FMT>` | `auto` | `auto` (json when piped), `table`, or `json` |
 
-**Returns:**
+**Returns (JSON):**
 ```json
 {
   "id": "sb-a1b2c3d4",
@@ -42,11 +43,11 @@ The `id` field is used in all subsequent commands.
 ### Destroy a sandbox
 
 ```bash
-clawstainer destroy <MACHINE_ID>
-clawstainer destroy --all
+clawstainer destroy <MACHINE_ID> [--format json]
+clawstainer destroy --all [--format json]
 ```
 
-**Returns:**
+**Returns (JSON):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -71,8 +72,9 @@ clawstainer exec <MACHINE_ID> <COMMAND> [OPTIONS]
 | `--workdir <PATH>` | `/root` | Working directory |
 | `--env <KEY=VAL>` | — | Set env var (repeatable) |
 | `--user <USER>` | `root` | Run as user |
+| `--format <FMT>` | `auto` | `auto` (json when piped), `table`, or `json` |
 
-**Returns:**
+**Returns (JSON):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -128,7 +130,9 @@ Use `MACHINE_ID:/path` for sandbox paths. Plain paths are host paths.
 | Pull (sandbox to host) | `clawstainer cp sb-xxx:/root/output.txt ./local/` |
 | Push (host to sandbox) | `clawstainer cp ./input.txt sb-xxx:/root/` |
 
-**Returns:**
+Pass `--format json` to guarantee JSON output.
+
+**Returns (JSON):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -147,10 +151,12 @@ Handles files and directories recursively. Cannot copy between two sandboxes dir
 Install predefined software components.
 
 ```bash
-clawstainer provision <MACHINE_ID> --components <LIST> [--timeout <SEC>]
+clawstainer provision <MACHINE_ID> --components <LIST> [--timeout <SEC>] [--format json]
 ```
 
-**Returns:**
+Progress is printed to stderr per component. Pass `--format json` to guarantee JSON output.
+
+**Returns (JSON):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -243,9 +249,9 @@ clawstainer logs <MACHINE_ID> [--last <N>] [--format json]
 Deploy multiple sandboxes from YAML.
 
 ```bash
-clawstainer fleet create --file fleet.yaml [--parallel <N>]
-clawstainer fleet destroy --all
-clawstainer fleet destroy --name <GROUP>
+clawstainer fleet create --file fleet.yaml [--parallel <N>] [--format json]
+clawstainer fleet destroy --all [--format json]
+clawstainer fleet destroy --name <GROUP> [--format json]
 ```
 
 **fleet.yaml format:**

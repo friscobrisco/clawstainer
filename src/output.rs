@@ -1,10 +1,25 @@
 use serde::Serialize;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 /// Print a JSON value to stdout
 pub fn print_json(value: &impl Serialize) {
     let json = serde_json::to_string_pretty(value).expect("failed to serialize JSON");
     println!("{json}");
+}
+
+/// Resolve the output format: if the user passed "auto" (the default),
+/// use "table" when stdout is a TTY, "json" otherwise (piped/scripted/agent).
+pub fn resolve_format(format: &str) -> &str {
+    match format {
+        "auto" => {
+            if io::stdout().is_terminal() {
+                "table"
+            } else {
+                "json"
+            }
+        }
+        other => other,
+    }
 }
 
 /// Structured CLI error returned as JSON to stderr

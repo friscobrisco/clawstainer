@@ -68,12 +68,18 @@ pub fn run(args: CpArgs, state: &StateStore) -> Result<()> {
         .into());
     }
 
-    output::print_json(&CpResult {
+    let result = CpResult {
         machine_id: machine_id.to_string(),
         direction: direction.to_string(),
         src: src_path.to_string(),
         dst: dst_path.to_string(),
-    });
+    };
+
+    if output::resolve_format(&args.format) == "json" {
+        output::print_json(&result);
+    } else {
+        println!("Copied {} {} -> {}", direction, result.src, result.dst);
+    }
 
     Ok(())
 }

@@ -127,8 +127,16 @@ clawstainer create [OPTIONS]
 | `--env-file <PATH>` | string | — | Path to a .env file to inject (KEY=VAL format, persists until destroyed) |
 | `--from <SNAPSHOT>` | string | — | Create from a named snapshot (reuse pre-provisioned image) |
 
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
+
 #### Output
 
+**Table (default in terminal):**
+```
+sb-a1b2c3d4    bold-parrot      running    10.0.0.2
+```
+
+**JSON (`--format json` or when piped):**
 ```json
 {
   "id": "sb-a1b2c3d4",
@@ -137,6 +145,13 @@ clawstainer create [OPTIONS]
   "ip": "10.0.0.2",
   "created_at": "2026-03-24T10:30:00Z"
 }
+```
+
+#### Progress feedback
+
+Create prints progress to stderr so it doesn't interfere with structured output:
+```
+Creating bold-parrot... base image ok, overlay ok, booting... network ok, ready (2.1s)
 ```
 
 #### Examples
@@ -198,9 +213,14 @@ clawstainer exec <MACHINE_ID> <COMMAND> [OPTIONS]
 | `--workdir <PATH>` | string | `/root` | Working directory inside the sandbox |
 | `--env <KEY=VAL>` | string | — | Set an environment variable. Repeatable |
 | `--user <USER>` | string | `root` | Run as this user |
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
 
 #### Output
 
+**Table (default in terminal):**
+In table mode, stdout and stderr are printed directly — like running the command yourself. Non-zero exit codes show a summary line.
+
+**JSON (`--format json` or when piped):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -274,11 +294,30 @@ clawstainer provision <MACHINE_ID> [OPTIONS]
 | `--components <LIST>` | string | — | Comma-separated component names |
 | `--file <PATH>` | string | — | Path to a YAML file listing components |
 | `--timeout <SECONDS>` | integer | `120` | Per-component install timeout |
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
 
 One of `--components` or `--file` is required.
 
+#### Progress feedback
+
+Provision prints per-component progress to stderr:
+```
+  [1/3] python3... ok (12s)
+  [2/3] git... ok (5s)
+  [3/3] nodejs... ok (18s)
+```
+
 #### Output
 
+**Table (default in terminal):**
+```
+COMPONENT            STATUS       DURATION
+python3              ok            12.0s
+git                  ok             5.0s
+nodejs               ok            18.0s
+```
+
+**JSON (`--format json` or when piped):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -401,9 +440,16 @@ clawstainer destroy --all
 | Flag | Description |
 |------|-------------|
 | `--all` | Destroy all sandboxes |
+| `--format <FMT>` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
 
 #### Output
 
+**Table (default in terminal):**
+```
+Destroyed sb-a1b2c3d4 (uptime 3600s)
+```
+
+**JSON (`--format json` or when piped):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -432,7 +478,7 @@ clawstainer list [OPTIONS]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--format <FMT>` | string | `table` | Output format: `table` or `json` |
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
 | `--status <STATUS>` | string | `all` | Filter: `running`, `stopped`, or `all` |
 | `--watch <SECONDS>` | integer | `0` | Live refresh every N seconds. `0` = one-shot |
 
@@ -465,7 +511,7 @@ clawstainer logs <MACHINE_ID> [OPTIONS]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--last <N>` | integer | `20` | Show last N entries |
-| `--format <FMT>` | string | `table` | Output format: `table` or `json` |
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
 | `--follow` | flag | — | Stream new entries (not yet implemented) |
 
 #### Table output
@@ -493,7 +539,7 @@ clawstainer stats [MACHINE_ID] [OPTIONS]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--watch <SECONDS>` | integer | `0` | Refresh every N seconds. `0` = one-shot |
-| `--format <FMT>` | string | `table` | Output format: `table` or `json` |
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
 
 #### Table output
 
@@ -588,8 +634,20 @@ Use `MACHINE_ID:/path` for sandbox paths. A plain path is treated as a host path
 | Pull (sandbox → host) | `clawstainer cp sb-abc:/root/output.txt ./local/` |
 | Push (host → sandbox) | `clawstainer cp ./file.txt sb-abc:/root/` |
 
+#### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
+
 #### Output
 
+**Table (default in terminal):**
+```
+Copied pull /root/output.txt -> ./local/
+```
+
+**JSON (`--format json` or when piped):**
 ```json
 {
   "machine_id": "sb-a1b2c3d4",
@@ -702,6 +760,7 @@ clawstainer fleet create [OPTIONS]
 | `--runtime <RUNTIME>` | string | `nspawn` | Runtime backend for all machines |
 | `--network <MODE>` | string | `nat` | Network mode for all machines |
 | `--parallel <N>` | integer | `3` | Max concurrent provisioning jobs (0 = sequential) |
+| `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
 
 #### Fleet YAML format
 
@@ -905,10 +964,12 @@ This file is embedded into the binary at compile time. To add custom components,
 
 ## For AI Agents
 
-clawstainer is designed for AI agent tool use. Every command returns structured JSON. A typical agent workflow:
+clawstainer is designed for AI agent tool use. All commands use `--format auto` by default, which outputs JSON when stdout is piped (the typical agent scenario) and table format in interactive terminals. Agents can also pass `--format json` explicitly to guarantee JSON output.
+
+A typical agent workflow:
 
 ```
-1. create  → get sandbox ID
+1. create  → get sandbox ID (JSON output with id, ip, status)
 2. exec    → run commands, read stdout/stderr/exit_code
 3. exec    → install dependencies, write code, run tests
 4. destroy → clean up when done

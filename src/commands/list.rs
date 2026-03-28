@@ -26,7 +26,7 @@ fn print_list(args: &ListArgs, state: &StateStore) -> Result<()> {
         Ok(machines)
     })?;
 
-    if args.format == "json" {
+    if output::resolve_format(&args.format) == "json" {
         output::print_json(&machines);
     } else {
         // Table format

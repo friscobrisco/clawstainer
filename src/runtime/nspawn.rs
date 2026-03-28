@@ -61,9 +61,13 @@ impl Runtime for NspawnRuntime {
         let id = generate_id();
         let caps_to_drop = Self::resolve_caps_to_drop(&opts);
         let name = opts.name.unwrap_or_else(generate_name);
+        let create_start = Instant::now();
+
+        eprint!("Creating {name}...");
 
         // Ensure base image exists
         let base_path = image::bootstrap::ensure_base_image()?;
+        eprint!(" base image ok,");
 
         // Extract snapshot if creating from one
         let snapshot_dir = if let Some(ref snap_name) = opts.from_snapshot {
@@ -74,6 +78,7 @@ impl Runtime for NspawnRuntime {
 
         // Setup overlay filesystem
         let root_path = image::overlay::setup(&id, &base_path, snapshot_dir.as_ref())?;
+        eprint!(" overlay ok,");
 
         // Allocate IP if networking is enabled
         let ip = if opts.network == "nat" {
@@ -128,17 +133,20 @@ impl Runtime for NspawnRuntime {
         let now = chrono::Utc::now();
 
         // Wait for machine to be fully ready
+        eprint!(" booting...");
         let needs_exec = ip.is_some() || opts.env_file.is_some();
         wait_for_machine_fully_ready(&id, needs_exec)?;
 
         // If we have an IP, configure it inside the container
         if let Some(ref ip) = ip {
             configure_container_network(&id, ip)?;
+            eprint!(" network ok,");
         }
 
         // Inject env file if provided
         let has_env_file = if let Some(ref env_file_path) = opts.env_file {
             inject_env_file(&id, env_file_path)?;
+            eprint!(" env ok,");
             true
         } else {
             false
@@ -168,6 +176,8 @@ impl Runtime for NspawnRuntime {
             s.machines.insert(id.clone(), machine);
             Ok(())
         })?;
+
+        eprintln!(" ready ({:.1}s)", create_start.elapsed().as_secs_f64());
 
         // If timeout > 0, spawn a background thread to auto-destroy
         if opts.timeout > 0 {

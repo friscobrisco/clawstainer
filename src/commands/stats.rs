@@ -147,7 +147,7 @@ fn print_global_stats(args: &StatsArgs, state: &StateStore) -> Result<()> {
         sandboxes,
     };
 
-    if args.format == "json" {
+    if output::resolve_format(&args.format) == "json" {
         output::print_json(&global);
     } else {
         println!("Host Disk: {:.0} MB / {:.0} MB ({:.1}%) — {:.0} MB available",
@@ -252,7 +252,7 @@ echo "CPU2:$(head -1 /proc/stat)"
 }
 
 fn print_stats(stats: &MachineStats, format: &str) {
-    if format == "json" {
+    if output::resolve_format(format) == "json" {
         output::print_json(stats);
         return;
     }

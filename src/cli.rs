@@ -55,6 +55,10 @@ pub struct CpArgs {
     pub src: String,
     /// Destination path (use MACHINE_ID:/path for sandbox paths)
     pub dst: String,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
+    pub format: String,
 }
 
 #[derive(clap::Args)]
@@ -87,8 +91,8 @@ pub struct SnapshotCreateArgs {
 
 #[derive(clap::Args)]
 pub struct SnapshotListArgs {
-    /// Output format: "table" | "json"
-    #[arg(long, default_value = "table")]
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
     pub format: String,
 }
 
@@ -130,6 +134,10 @@ pub struct FleetCreateArgs {
     /// Max parallel provisioning jobs (0 = sequential)
     #[arg(long, default_value = "3")]
     pub parallel: usize,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
+    pub format: String,
 }
 
 #[derive(clap::Args)]
@@ -141,6 +149,10 @@ pub struct FleetDestroyArgs {
     /// Destroy machines belonging to a specific fleet group name
     #[arg(long)]
     pub name: Option<String>,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
+    pub format: String,
 }
 
 #[derive(clap::Args)]
@@ -198,6 +210,10 @@ pub struct CreateArgs {
     /// Create from a named snapshot (reuse pre-provisioned image)
     #[arg(long)]
     pub from: Option<String>,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
+    pub format: String,
 }
 
 #[derive(clap::Args)]
@@ -216,6 +232,10 @@ pub struct ProvisionArgs {
     /// Per-component timeout in seconds
     #[arg(long, default_value = "120")]
     pub timeout: u64,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
+    pub format: String,
 }
 
 #[derive(clap::Args)]
@@ -241,6 +261,10 @@ pub struct ExecArgs {
     /// Run as user
     #[arg(long, default_value = "root")]
     pub user: String,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
+    pub format: String,
 }
 
 #[derive(clap::Args)]
@@ -261,12 +285,16 @@ pub struct DestroyArgs {
     /// Destroy all sandboxes
     #[arg(long)]
     pub all: bool,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
+    pub format: String,
 }
 
 #[derive(clap::Args)]
 pub struct ListArgs {
-    /// Output format: "table" | "json"
-    #[arg(long, default_value = "table")]
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
     pub format: String,
 
     /// Filter by status: "running" | "stopped" | "all"
@@ -291,8 +319,8 @@ pub struct LogsArgs {
     #[arg(long, default_value = "20")]
     pub last: usize,
 
-    /// Output format: "table" | "json"
-    #[arg(long, default_value = "table")]
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
     pub format: String,
 }
 
@@ -305,7 +333,7 @@ pub struct StatsArgs {
     #[arg(long, default_value = "0")]
     pub watch: u64,
 
-    /// Output format: "table" | "json"
-    #[arg(long, default_value = "table")]
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto")]
     pub format: String,
 }

@@ -27,11 +27,13 @@ impl Provisioner {
     ) -> Result<ProvisionResult> {
         let resolved = resolve_components(component_names, &self.components_file)?;
         let mut results = Vec::new();
+        let total = resolved.len();
 
-        for name in &resolved {
+        for (i, name) in resolved.iter().enumerate() {
             let def = self.components_file.components.get(name)
                 .ok_or_else(|| anyhow::anyhow!("Unknown component: {name}"))?;
             let start = Instant::now();
+            eprint!("  [{}/{}] {name}...", i + 1, total);
 
             let component_timeout = def.timeout.unwrap_or(timeout);
 
@@ -71,6 +73,7 @@ impl Provisioner {
 
                     match verify_result {
                         Ok(v) if v.exit_code == 0 => {
+                            eprintln!(" ok ({:.0}s)", start.elapsed().as_secs_f64());
                             results.push(ComponentResult {
                                 component: name.clone(),
                                 status: "ok".to_string(),
@@ -79,6 +82,7 @@ impl Provisioner {
                             });
                         }
                         _ => {
+                            eprintln!(" verify failed ({:.0}s)", start.elapsed().as_secs_f64());
                             results.push(ComponentResult {
                                 component: name.clone(),
                                 status: "error".to_string(),
@@ -89,6 +93,7 @@ impl Provisioner {
                     }
                 }
                 Ok(r) => {
+                    eprintln!(" failed (exit {})", r.exit_code);
                     results.push(ComponentResult {
                         component: name.clone(),
                         status: "error".to_string(),
@@ -97,6 +102,7 @@ impl Provisioner {
                     });
                 }
                 Err(e) => {
+                    eprintln!(" error: {e}");
                     results.push(ComponentResult {
                         component: name.clone(),
                         status: "error".to_string(),

@@ -13,6 +13,8 @@ pub fn run(args: CreateArgs, runtime: &dyn Runtime, state: &StateStore) -> Resul
         .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
         .unwrap_or_default();
 
+    let format = output::resolve_format(&args.format).to_string();
+
     let opts = CreateOpts {
         name: args.name,
         memory_mb: args.memory,
@@ -28,6 +30,17 @@ pub fn run(args: CreateArgs, runtime: &dyn Runtime, state: &StateStore) -> Resul
     };
 
     let machine = runtime.create(opts, state)?;
-    output::print_json(&machine);
+
+    if format == "json" {
+        output::print_json(&machine);
+    } else {
+        println!(
+            "{:<14} {:<16} {:<10} {}",
+            machine.id,
+            machine.name,
+            machine.status,
+            machine.ip.as_deref().unwrap_or("-")
+        );
+    }
     Ok(())
 }

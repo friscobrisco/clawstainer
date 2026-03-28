@@ -17,6 +17,8 @@ pub fn run(args: ExecArgs, runtime: &dyn Runtime, state: &StateStore) -> Result<
         }
     }
 
+    let format = output::resolve_format(&args.format).to_string();
+
     let opts = ExecOpts {
         command: args.command.clone(),
         timeout: args.timeout,
@@ -30,6 +32,24 @@ pub fn run(args: ExecArgs, runtime: &dyn Runtime, state: &StateStore) -> Result<
     // Log the exec
     execlog::logger::append(&args.machine_id, &args.command, &result)?;
 
-    output::print_json(&result);
+    if format == "json" {
+        output::print_json(&result);
+    } else {
+        // In table mode, print stdout directly (most common use case)
+        if !result.stdout.is_empty() {
+            print!("{}", result.stdout);
+        }
+        if !result.stderr.is_empty() {
+            eprint!("{}", result.stderr);
+        }
+        if result.exit_code != 0 {
+            eprintln!(
+                "[exit {} in {:.1}s{}]",
+                result.exit_code,
+                result.duration_ms as f64 / 1000.0,
+                if result.timed_out { " TIMED OUT" } else { "" }
+            );
+        }
+    }
     Ok(())
 }

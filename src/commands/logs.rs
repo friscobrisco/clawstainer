@@ -7,7 +7,7 @@ use crate::output;
 pub fn run(args: LogsArgs) -> Result<()> {
     let entries = execlog::reader::read_last(&args.machine_id, args.last)?;
 
-    if args.format == "json" {
+    if output::resolve_format(&args.format) == "json" {
         output::print_json(&entries);
     } else {
         if entries.is_empty() {
