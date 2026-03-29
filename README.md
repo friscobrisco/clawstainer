@@ -96,15 +96,15 @@ clawstainer create --name claude-box --memory 2048 --cpus 2
 clawstainer provision <id> --components claude-code
 
 # Hermes Agent (NousResearch)
-clawstainer create --name hermes-box --memory 2048 --cpus 2
+clawstainer create --name hermes-box --memory 2048 --cpus 2 --linger
 clawstainer provision <id> --components hermes-agent
 
 # OpenClaw Gateway
-clawstainer create --name openclaw-box --memory 2048 --cpus 2
+clawstainer create --name openclaw-box --memory 2048 --cpus 2 --linger
 clawstainer provision <id> --components openclaw
 ```
 
-Each template includes all dependencies and has built-in timeouts — no extra flags needed.
+Each template includes all dependencies and has built-in timeouts. Use `--linger` for agents that run long-lived services (like OpenClaw and Hermes) — without it, systemd may stop user sessions on logout/idle and kill the gateway process.
 
 ## Fleet Management
 
@@ -118,12 +118,14 @@ machines:
     memory: 2048
     cpus: 2
     provision: hermes-agent
+    linger: true
 
   - name: openclaw
     count: 10
     memory: 1024
     cpus: 2
     provision: openclaw
+    linger: true
 ```
 
 ```bash

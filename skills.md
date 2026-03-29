@@ -24,6 +24,7 @@ clawstainer create [OPTIONS]
 | `--cap-add <CAP,...>` | — | Add capabilities back |
 | `--cap-drop <CAP,...>` | — | Drop additional capabilities |
 | `--env-file <PATH>` | — | Inject KEY=VAL pairs from file |
+| `--linger` | `false` | Enable systemd lingering (keeps agent services alive after logout). Recommended for OpenClaw, Hermes, and other long-lived agents |
 | `--from <SNAPSHOT>` | — | Create from a named snapshot |
 | `--format <FMT>` | `auto` | `auto` (json when piped), `table`, or `json` |
 

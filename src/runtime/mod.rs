@@ -84,6 +84,7 @@ pub struct CreateOpts {
     pub cap_drop: Vec<String>,
     pub env_file: Option<String>,
     pub from_snapshot: Option<String>,
+    pub linger: bool,
 }
 
 pub struct ExecOpts {

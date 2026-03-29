@@ -125,6 +125,7 @@ clawstainer create [OPTIONS]
 | `--cap-add <CAP,...>` | string | — | Comma-separated capabilities to add back on top of the security profile |
 | `--cap-drop <CAP,...>` | string | — | Comma-separated capabilities to drop on top of the security profile |
 | `--env-file <PATH>` | string | — | Path to a .env file to inject (KEY=VAL format, persists until destroyed) |
+| `--linger` | bool | `false` | Enable systemd lingering for the container user. Keeps user services (e.g. gateways) alive after logout. Recommended for agents like OpenClaw and Hermes |
 | `--from <SNAPSHOT>` | string | — | Create from a named snapshot (reuse pre-provisioned image) |
 
 | `--format <FMT>` | string | `auto` | Output format: `auto` (table for TTY, json for pipes), `table`, or `json` |
@@ -177,6 +178,9 @@ clawstainer create --name permissive --security standard
 
 # Strict profile but re-add CAP_NET_RAW
 clawstainer create --name scanner --cap-add CAP_NET_RAW
+
+# Enable lingering for long-lived agent services
+clawstainer create --name openclaw-box --memory 2048 --cpus 2 --linger
 
 # Inject environment variables from a file
 clawstainer create --name api-box --env-file .env
@@ -369,8 +373,8 @@ clawstainer provision <id> --components claude-code
 clawstainer create --name hermes-box --memory 2048 --cpus 2
 clawstainer provision <id> --components hermes-agent
 
-# OpenClaw Gateway sandbox
-clawstainer create --name openclaw-box --memory 2048 --cpus 2
+# OpenClaw Gateway sandbox (--linger keeps the gateway alive after logout)
+clawstainer create --name openclaw-box --memory 2048 --cpus 2 --linger
 clawstainer provision <id> --components openclaw
 ```
 
@@ -771,12 +775,14 @@ machines:
     memory: 2048           # Memory in MB (default: 512)
     cpus: 2                # CPU cores (default: 1)
     provision: hermes-agent # Component or bundle to install (optional)
+    linger: true           # Keep agent services alive after logout
 
   - name: openclaw
     count: 10
     memory: 1024
     cpus: 2
     provision: openclaw
+    linger: true
 ```
 
 If `count` is 1, the machine is named exactly as specified. If `count` > 1, machines are named `{name}-{index}` (e.g., `openclaw-0`, `openclaw-1`, ...).

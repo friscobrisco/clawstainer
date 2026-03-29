@@ -56,6 +56,7 @@ components:
       chmod +x /usr/local/bin/hermes-agent
       echo 'export PATH="/root/.local/bin:/root/.hermes/node/bin:$PATH"' >> /root/.bashrc
       echo 'export PATH="/root/.local/bin:/root/.hermes/node/bin:$PATH"' >> /root/.bashrc
+      mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/root
     verify: test -d /root/.hermes/hermes-agent && test -f /root/.local/bin/uv
     timeout: 600
     tags: [agent, ai]
@@ -96,6 +97,7 @@ components:
       systemctl daemon-reload
       systemctl enable openclaw-gateway
       systemctl start openclaw-gateway
+      mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/root
     verify: openclaw --version
     tags: [agent, platform]
 

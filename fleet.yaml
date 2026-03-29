@@ -4,6 +4,7 @@ machines:
     memory: 1024
     cpus: 2
     provision: openclaw
+    linger: true   # keep the gateway alive after logout
     # security: strict is the default — drops CAP_NET_RAW, CAP_SYS_PTRACE, CAP_MKNOD
 
   - name: builder

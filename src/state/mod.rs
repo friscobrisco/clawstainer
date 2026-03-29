@@ -28,6 +28,8 @@ pub struct Machine {
     pub security: String,
     #[serde(default)]
     pub has_env_file: bool,
+    #[serde(default)]
+    pub linger: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fleet_name: Option<String>,
 }
@@ -190,6 +192,7 @@ mod tests {
             runtime: "nspawn".to_string(),
             security: "strict".to_string(),
             has_env_file: false,
+            linger: false,
             fleet_name: None,
         }
     }

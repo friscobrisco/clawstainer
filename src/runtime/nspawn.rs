@@ -80,6 +80,16 @@ impl Runtime for NspawnRuntime {
         let root_path = image::overlay::setup(&id, &base_path, snapshot_dir.as_ref())?;
         eprint!(" overlay ok,");
 
+        // Enable systemd lingering if requested
+        if opts.linger {
+            let linger_dir = root_path.join("var/lib/systemd/linger");
+            std::fs::create_dir_all(&linger_dir)
+                .map_err(|e| ClawError::CreateFailed(format!("Failed to create linger dir: {e}")))?;
+            std::fs::File::create(linger_dir.join("root"))
+                .map_err(|e| ClawError::CreateFailed(format!("Failed to enable linger: {e}")))?;
+            eprint!(" linger ok,");
+        }
+
         // Allocate IP if networking is enabled
         let ip = if opts.network == "nat" {
             // Ensure bridge and NAT are up
@@ -169,6 +179,7 @@ impl Runtime for NspawnRuntime {
             runtime: "nspawn".to_string(),
             security: opts.security.clone(),
             has_env_file,
+            linger: opts.linger,
             fleet_name: None,
         };
 

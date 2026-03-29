@@ -40,6 +40,9 @@ struct FleetMachineDef {
     /// Path to a .env file to inject into the sandbox
     #[serde(default)]
     env_file: Option<String>,
+    /// Enable systemd lingering (keeps agent services alive after logout)
+    #[serde(default)]
+    linger: bool,
 }
 
 fn default_count() -> u32 { 1 }
@@ -142,6 +145,7 @@ fn create_fleet_machines(
                 cap_drop: def.cap_drop.clone(),
                 env_file: def.env_file.clone(),
                 from_snapshot: None,
+                linger: def.linger,
             };
 
             let info = match rt.create(create_opts, state) {

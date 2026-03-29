@@ -27,6 +27,7 @@ pub fn run(args: CreateArgs, runtime: &dyn Runtime, state: &StateStore) -> Resul
         cap_drop,
         env_file: args.env_file,
         from_snapshot: args.from,
+        linger: args.linger,
     };
 
     let machine = runtime.create(opts, state)?;

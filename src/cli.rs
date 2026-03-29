@@ -207,6 +207,10 @@ pub struct CreateArgs {
     #[arg(long, value_name = "PATH")]
     pub env_file: Option<String>,
 
+    /// Enable systemd lingering for the container user (keeps user services alive after logout)
+    #[arg(long)]
+    pub linger: bool,
+
     /// Create from a named snapshot (reuse pre-provisioned image)
     #[arg(long)]
     pub from: Option<String>,

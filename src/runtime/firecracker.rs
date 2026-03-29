@@ -206,6 +206,7 @@ impl Runtime for FirecrackerRuntime {
             runtime: "firecracker".to_string(),
             security: opts.security.clone(),
             has_env_file: opts.env_file.is_some(),
+            linger: opts.linger,
             fleet_name: None,
         };
 
