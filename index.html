@@ -290,6 +290,52 @@
       </div>
     </section>
 
+    <!-- ==================== AGENT SANDBOXES ==================== -->
+    <section class="section" id="agent-sandboxes">
+      <div class="container">
+        <div class="section-label">
+          <span class="annotation">Agent-Powered</span>
+        </div>
+
+        <div class="how-layout">
+          <div class="how-steps" style="gap: var(--space-5);">
+            <h2 class="section-heading">Give your agent the power to spin up sandboxes</h2>
+            <p class="section-desc" style="margin-bottom: 0;">Your AI agent doesn't just live inside a sandbox — it can create, snapshot, and destroy them on its own. Clawstainer's CLI is designed to be called programmatically, so agents can provision isolated environments as part of their workflows.</p>
+            <ul style="color: var(--color-text-secondary); font-size: var(--text-base); line-height: 1.7; padding-left: var(--space-6); margin: 0;">
+              <li style="margin-bottom: var(--space-2);">Agent needs a clean Python environment? <strong style="color: var(--color-text);">Create one in seconds.</strong></li>
+              <li style="margin-bottom: var(--space-2);">Task done? <strong style="color: var(--color-text);">Destroy the sandbox.</strong> No cleanup.</li>
+              <li style="margin-bottom: var(--space-2);">Need to retry? <strong style="color: var(--color-text);">Restore from snapshot</strong> instantly.</li>
+            </ul>
+          </div>
+
+          <div class="how-terminal-wrap">
+            <div class="terminal fade-in">
+              <div class="terminal-header">
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-title">agent workflow</span>
+              </div>
+              <div class="terminal-body">
+<code><span class="comment"># Agent spins up an isolated sandbox</span>
+<span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">task-7f3a</span> <span class="flag">--from</span> <span class="string">python3-ready</span>
+<span class="comment"># ✓ Created task-7f3a in 0.8s (from snapshot)</span>
+
+<span class="comment"># Runs untrusted code inside the sandbox</span>
+<span class="prompt">$ </span>clawstainer exec task-7f3a <span class="string">"python3 run_task.py"</span>
+<span class="comment"># ✓ Task complete — output saved</span>
+
+<span class="comment"># Copies results out, then destroys the sandbox</span>
+<span class="prompt">$ </span>clawstainer cp task-7f3a:/root/results.json <span class="string">./</span>
+<span class="prompt">$ </span>clawstainer destroy task-7f3a
+<span class="comment"># ✓ Destroyed task-7f3a</span></code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ==================== FLEET ==================== -->
     <section class="section fleet-section" id="fleet">
       <div class="container">
