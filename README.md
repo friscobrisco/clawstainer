@@ -1,6 +1,5 @@
 # clawstainer
 
-[![CI](https://img.shields.io/github/actions/workflow/status/reneerosillo/clawstainer/ci.yml?label=CI)](https://github.com/reneerosillo/clawstainer/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
@@ -154,6 +153,10 @@ Fleet create uses a two-pass approach: creates all machines first (visible in `l
 ## Documentation
 
 See [docs.md](docs.md) for the full CLI reference, architecture, and configuration.
+
+## Author
+
+Built by [@rerosillo](https://x.com/rerosillo)
 
 ## License
 

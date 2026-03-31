@@ -3,6 +3,12 @@ name = "clawstainer"
 version = "0.1.0"
 edition = "2021"
 description = "Lightweight isolated Linux environments for AI agents"
+license = "MIT"
+repository = "https://github.com/friscobrisco/clawstainer"
+readme = "README.md"
+authors = ["Renée Rosillo"]
+keywords = ["container", "sandbox", "ai", "agent", "nspawn"]
+categories = ["command-line-utilities", "virtualization"]
 
 [[bin]]
 name = "clawstainer"
@@ -11,6 +17,10 @@ path = "src/main.rs"
 [[bin]]
 name = "claw-agent"
 path = "src/agent/main.rs"
+required-features = ["firecracker"]
+
+[features]
+firecracker = []
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
