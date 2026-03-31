@@ -1,10 +1,15 @@
 # clawstainer
 
+[![CI](https://img.shields.io/github/actions/workflow/status/reneerosillo/clawstainer/ci.yml?label=CI)](https://github.com/reneerosillo/clawstainer/actions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
+
 Lightweight, isolated Linux environments for AI agents. Spin up a sandbox in seconds, run commands, install packages, tear it down — all from a single CLI.
 
 Built in Rust. Two runtime backends:
 - **systemd-nspawn** — container-based, works everywhere including macOS via Lima
-- **Firecracker** — microVM-based, hardware-level isolation, requires bare metal or KVM-capable Linux
+- **Firecracker** — microVM-based, hardware-level isolation, requires bare metal or KVM-capable Linux *(untested — included as an experimental option only)*
 
 ## Quick Start
 
@@ -73,6 +78,8 @@ sudo clawstainer create --name my-box
 # Firecracker runtime (requires /dev/kvm)
 sudo clawstainer create --name fast-box --runtime firecracker
 ```
+
+> **⚠ Firecracker is untested.** It is included as an experimental runtime option but has not been validated in production. Use nspawn (the default) for reliable operation.
 
 ### Runtime Comparison
 
