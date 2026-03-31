@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>An Agent for Every Team Member — Clawstainer</title>
+  <meta name="description" content="What happens when Rebot stops being one agent and starts being five. Per-person sandboxes with Clawstainer.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="../base.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+  <!-- ==================== HEADER ==================== -->
+  <header class="site-header">
+    <div class="container">
+      <a href="../" class="logo-group" aria-label="Clawstainer home">
+        <svg width="180" height="40" viewBox="0 0 360 80" aria-hidden="true">
+          <rect x="56.00" y="36.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.60" transform="rotate(22.0 60.00 40.00)"/>
+          <rect x="50.14" y="50.14" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.75" transform="rotate(67.0 54.14 54.14)"/>
+          <rect x="36.00" y="56.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.95" transform="rotate(112.0 40.00 60.00)"/>
+          <rect x="21.86" y="50.14" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.75" transform="rotate(157.0 25.86 54.14)"/>
+          <rect x="16.00" y="36.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.60" transform="rotate(202.0 20.00 40.00)"/>
+          <rect x="21.86" y="21.86" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.40" transform="rotate(247.0 25.86 25.86)"/>
+          <rect x="36.00" y="16.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.40" transform="rotate(292.0 40.00 20.00)"/>
+          <rect x="50.14" y="21.86" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.40" transform="rotate(337.0 54.14 25.86)"/>
+          <text x="76" y="47" font-family="'JetBrains Mono', monospace" font-size="30" font-weight="600" fill="currentColor" letter-spacing="-0.02em">clawstainer</text>
+        </svg>
+      </a>
+      <nav>
+        <ul class="nav-links" role="list">
+          <li><a href="../#how">How It Works</a></li>
+          <li><a href="../#use-cases">Use Cases</a></li>
+          <li><a href="../#fleet">Fleet</a></li>
+          <li><a href="./">Blog</a></li>
+          <li><a href="https://github.com/friscobrisco/clawstainer" target="_blank" rel="noopener noreferrer" class="btn-ghost">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="post-header">
+      <a href="./" class="post-back">← Back to blog</a>
+      <div class="post-meta">
+        <span class="blog-entry-date">2026-03-28</span>
+        <span class="blog-entry-tag">team infra</span>
+      </div>
+      <h1>An Agent for Every Team Member</h1>
+    </div>
+
+    <article class="post-body">
+      <p><em>What happens when Rebot stops being one agent and starts being five.</em></p>
+
+      <p>A few weeks ago I <a href="https://www.linkedin.com/pulse/we-might-have-accidentally-hired-mac-mini-ren%C3%A9e-rosillo-hpd5c/">wrote about how agents help startups upskill rapidly</a> — one OpenClaw instance on a Mac Mini, one Telegram group, $70 a week in token costs. The team was messaging it to reorder Kanban boards, pull GitHub issues, triage calendars — all the back-office stuff that eats your day but doesn't move the product forward. The math worked. The $0.80 Kanban reorder that replaced a 30-minute interruption worked. We said at the time that we weren't sure if an agent server belongs in the infrastructure budget or the hiring budget. Seven weeks in, I have an update: it might be both.</p>
+
+      <p>Because we stopped running one agent. We started running one per person.</p>
+
+      <h2>The Problem with a Shared Agent</h2>
+
+      <p>The single-agent setup was great until it wasn't. Three people messaging the same Telegram bot, context from one person's task bleeding into another's, and the Kanban reorder that should take three minutes taking eight because the agent was mid-run on someone else's GitHub query. Shared agents are like shared desks — they work when nobody's around, and they don't when everyone is.</p>
+
+      <p>The obvious answer is to spin up more instances. The less obvious problem is that provisioning an agent environment is a 30-45 minute affair. Install Node, install OpenClaw, configure the gateway, set up systemd so it survives reboots, pair the messaging channel, write the personality files, inject the API keys. Do that five times and you've burned a morning. And if something breaks, you're doing it again.</p>
+
+      <p>That's where <a href="https://github.com/friscobrisco/clawstainer">Clawstainer</a> comes in. We started using it to manage disposable agent sandboxes, and the workflow went from "45 minutes per person" to "seconds per person, after the first one."</p>
+
+      <h2>How It Works: Snapshot Once, Stamp Out Everywhere</h2>
+
+      <p>Clawstainer is a CLI that spins up lightweight, isolated Linux sandboxes. Built in Rust, uses <code>systemd-nspawn</code> for container isolation — each sandbox gets its own filesystem, network, and process space. Sandboxes can't see each other. You create, provision, exec, snapshot, destroy — all from one binary.</p>
+
+      <p>Here's the workflow we landed on:</p>
+
+      <h3>1. Build one golden agent sandbox</h3>
+
+<pre><code># Create a sandbox with enough juice for an OpenClaw gateway
+clawstainer create --name agent-base --memory 2048 --cpus 2 --linger
+
+# Provision it with OpenClaw (built-in template handles everything)
+clawstainer provision &lt;id&gt; --components openclaw</code></pre>
+
+      <p>That <code>--components openclaw</code> runs a full provisioning recipe that installs the runtime, creates a systemd service, enables it, and starts the gateway. The <code>--linger</code> flag keeps the service alive even when nobody's shelled in. Five to ten minutes, unattended.</p>
+
+      <p>What actually runs behind the scenes:</p>
+
+<pre><code># components.yaml — the openclaw provisioning recipe
+openclaw:
+  timeout: 600
+  install: |
+    apt-get update
+    apt-get install -y curl git
+    curl -fsSL https://openclaw.ai/install.sh | bash || true
+    cat &gt; /etc/systemd/system/openclaw-gateway.service &lt;&lt; 'UNIT'
+    [Unit]
+    Description=OpenClaw Gateway
+    After=network.target
+
+    [Service]
+    Type=simple
+    ExecStart=/usr/local/bin/openclaw gateway
+    Restart=always
+    RestartSec=3
+    Environment=HOME=/root
+    WorkingDirectory=/root
+
+    [Install]
+    WantedBy=multi-user.target
+    UNIT
+    systemctl daemon-reload
+    systemctl enable openclaw-gateway
+    systemctl start openclaw-gateway
+  verify: openclaw --version</code></pre>
+
+      <h3>2. Snapshot it</h3>
+
+<pre><code>clawstainer snapshot create &lt;id&gt; --name openclaw-team</code></pre>
+
+      <p>This captures the overlay upper layer — every installed package, every config file, the systemd service, all of it — into a reusable image stored at <code>/var/lib/clawstainer/snapshots/</code>. The snapshot is a tarball of the delta from the base Ubuntu image.</p>
+
+      <h3>3. Stamp out per-person sandboxes in seconds</h3>
+
+<pre><code>clawstainer create --name sarah-agent --from openclaw-team --linger
+clawstainer create --name mike-agent --from openclaw-team --linger
+clawstainer create --name jay-agent --from openclaw-team --linger</code></pre>
+
+      <p>Each one boots in 2-3 seconds with OpenClaw already installed and the gateway ready. No re-provisioning. OverlayFS stacks the snapshot layer between the base image and a fresh writable layer, so each person's sandbox starts identical and diverges as they use it.</p>
+
+      <p>Check the fleet:</p>
+
+<pre><code>clawstainer list
+
+ID             NAME             STATUS     MEMORY   CPUS   UPTIME       IP
+sb-a1b2c3d4    sarah-agent      running    2048MB   2      3m           10.0.0.2
+sb-e5f6g7h8    mike-agent       running    2048MB   2      3m           10.0.0.3
+sb-i9j0k1l2    jay-agent        running    2048MB   2      3m           10.0.0.4</code></pre>
+
+      <p>Three isolated agents. Three separate IPs. Three separate filesystems. Under a minute.</p>
+
+      <h2>Or: One YAML, One Command</h2>
+
+      <p>If you'd rather not create them individually, Clawstainer has fleet management. Write a YAML, run one command, and the whole team is up:</p>
+
+<pre><code># team-fleet.yaml
+machines:
+  - name: eng-agent
+    count: 3
+    memory: 2048
+    cpus: 2
+    provision: openclaw
+    linger: true
+
+  - name: ops-agent
+    count: 1
+    memory: 1024
+    cpus: 2
+    provision: openclaw
+    linger: true
+
+  - name: lead-agent
+    count: 1
+    memory: 2048
+    cpus: 2
+    provision: hermes-agent
+    linger: true</code></pre>
+
+<pre><code>clawstainer fleet create --file team-fleet.yaml --parallel 3</code></pre>
+
+      <p>Fleet uses a two-pass approach: creates all machines first (they show up in <code>clawstainer list</code> immediately), then provisions them in parallel batches. Three at a time by default, configurable up to however many your server can handle. For a team of five that's maybe 10-15 minutes total, all unattended.</p>
+
+      <p>The output tells you exactly what happened:</p>
+
+<pre><code>=== Creating 5 machines ===
+
+[1/5] Creating eng-agent-0...
+[2/5] Creating eng-agent-1...
+[3/5] Creating eng-agent-2...
+[4/5] Creating ops-agent...
+[5/5] Creating lead-agent...
+
+=== Provisioning 5 machines (parallel: 3) ===
+
+  Provisioning eng-agent-0 with openclaw...
+  Provisioning eng-agent-1 with openclaw...
+  Provisioning eng-agent-2 with openclaw...
+  Provisioned eng-agent-0 (342s)
+  Provisioned eng-agent-1 (338s)
+  Provisioned eng-agent-2 (351s)
+  Provisioning ops-agent with openclaw...
+  Provisioning lead-agent with hermes-agent...
+  Provisioned ops-agent (329s)
+  Provisioned lead-agent (412s)
+
+Fleet ready: 5 created, 5 provisioned, 0 failed</code></pre>
+
+      <p>Tear it down just as fast:</p>
+
+<pre><code># Remove one group
+clawstainer fleet destroy --name eng-agent
+
+# Remove everything
+clawstainer fleet destroy --all</code></pre>
+
+      <h2>Personalizing Each Team Member's Agent</h2>
+
+      <p>An agent without personality is just a chatbot in a fancier container. The real value comes from configuring each one for the person using it.</p>
+
+      <p>Shell into each sandbox:</p>
+
+<pre><code>clawstainer shell &lt;sarah-agent-id&gt;</code></pre>
+
+      <h3>SOUL.md — The agent's identity</h3>
+
+      <p>For an engineering lead:</p>
+
+<pre><code># Soul
+
+You are a sharp, efficient technical assistant. No fluff.
+You help with code reviews, architecture decisions, GitHub PR triage,
+and staying on top of the team's sprint progress.
+
+Default behavior:
+- When asked to summarize, be concise. Bullet points over paragraphs.
+- When reviewing code, focus on correctness and edge cases first,
+  style second.
+- Proactively flag blockers in GitHub issues.</code></pre>
+
+      <p>For an ops/admin person:</p>
+
+<pre><code># Soul
+
+You are an organized, proactive operations assistant. You help with
+calendar management, meeting prep, travel booking, team coordination,
+and keeping the Notion workspace clean.
+
+You are not a coding assistant. When asked technical questions,
+redirect to the engineering lead's agent or suggest the user
+ask in the dev channel.</code></pre>
+
+      <h3>USER.md — Context about the person</h3>
+
+<pre><code># User
+
+- Name: Sarah
+- Role: CTO
+- Timezone: America/Los_Angeles
+- Focus areas: Core product architecture, backend systems, API design
+- Communication style: Direct and technical. Skip the pleasantries.
+- Tools: GitHub, Notion (engineering board), Google Calendar</code></pre>
+
+      <h3>Pairing the messaging channel</h3>
+
+<pre><code># Inside the sandbox
+openclaw channels login   # scans QR for WhatsApp, or sets up Telegram bot</code></pre>
+
+      <p>Each person talks to their own agent on their own channel. No cross-talk, no shared sessions, no context pollution.</p>
+
+      <h2>Mix and Match: OpenClaw for Most, Hermes for the Technical</h2>
+
+      <p>Not everyone on the team needs the same agent. OpenClaw is excellent for people who want to message their agent and have things happen — calendar management, Notion triage, email drafts, information retrieval. It's the right default.</p>
+
+      <p>For the more technical team members — the ones who want their agent to learn, improve, and handle development workflows — Clawstainer has a built-in Hermes Agent component:</p>
+
+<pre><code>clawstainer create --name dev-hermes --memory 2048 --cpus 2 --linger
+clawstainer provision &lt;id&gt; --components hermes-agent</code></pre>
+
+      <p>The provisioning recipe installs the full Hermes stack:</p>
+
+<pre><code>hermes-agent:
+  install: |
+    apt-get update
+    apt-get install -y curl git xz-utils
+    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
+    cd /root/.hermes/hermes-agent && /root/.local/bin/uv pip install -r requirements.txt || true
+    printf '#!/bin/bash\ncd /root/.hermes/hermes-agent && source venv/bin/activate && python hermes "$@"\n' &gt; /usr/local/bin/hermes-agent
+    chmod +x /usr/local/bin/hermes-agent
+  verify: test -d /root/.hermes/hermes-agent && test -f /root/.local/bin/uv
+  timeout: 600</code></pre>
+
+      <p>Hermes has what OpenClaw doesn't: a learning loop. It creates skills from experience, improves them during use, and writes procedural memory so it doesn't repeat mistakes. For someone living in the codebase all day, that compounds fast.</p>
+
+      <p>If a team member later outgrows OpenClaw, Hermes has native migration:</p>
+
+<pre><code>hermes claw migrate              # interactive, imports SOUL.md, memories, skills, configs
+hermes claw migrate --dry-run    # preview first</code></pre>
+
+      <h2>The Updated Math</h2>
+
+      <p>In the original article, we shared the cost structure: $699 hardware, ~$70/week in token usage for one agent, less than a part-time ops hire. Here's what it looks like with five agents:</p>
+
+      <p><strong>Hardware</strong>: Same Mac Mini. It handles five sandboxes with resources to spare. A 4-core/8GB VPS ($20-40/month) also works comfortably.</p>
+
+      <p><strong>Token costs per agent</strong>: Varies by usage. Our experience over seven weeks:</p>
+
+      <ul>
+        <li>Light users (ops, occasional queries): $20-40/month</li>
+        <li>Medium users (daily task management, GitHub triage): $50-80/month</li>
+        <li>Heavy users (engineering lead, frequent multi-step workflows): $100-150/month</li>
+      </ul>
+
+      <p><strong>Total for a team of five</strong>: $300-500/month in API costs, depending on models and usage patterns.</p>
+
+      <p><strong>Clawstainer, OpenClaw, Hermes</strong>: All free, all MIT licensed. You pay the LLM provider, not the runtime.</p>
+
+      <p><strong>Comparison</strong>: A single part-time virtual assistant runs $1,500-3,000/month. A junior ops person is $4,000+. Five agents covering most of what that person would do, for 10-15% of the cost, available 24/7, with instant context about your company.</p>
+
+      <p>It's early. The agents don't handle everything. But the stuff they do handle — the calendar triage, the Kanban shuffling, the GitHub issue categorization, the meeting prep, the email drafts — that's the operational drag that slows down early-stage teams. Getting it off everyone's plate, individually, changes the texture of a workday.</p>
+
+      <h2>What Changed from One Agent to Five</h2>
+
+      <p>The shift from "team shares one agent" to "each person has their own" isn't just about avoiding context collisions. It changes behavior. People start using their agent differently when it's theirs. They customize the personality. They build up memories and patterns specific to their workflow. They message it at 11pm to prep for tomorrow's standup, because it's not occupying someone else's session.</p>
+
+      <p>What started as a $699 experiment is now part of how we operate. The Mac Mini runs five Clawstainer sandboxes — three OpenClaw instances for the non-engineering team, one Hermes Agent for the technical lead, and one experimental box we keep breaking and rebuilding (that's what snapshots are for). The team messages their agents on Telegram. The agents stay on. The context builds up.</p>
+
+      <p>We said in the original article that the agent server might be the hire nobody's talking about yet. Seven weeks later, I'd revise that: it's the hire that multiplies. One per person. Same machine. Different brains.</p>
+
+      <p>The tools are open source. The infrastructure is a Mac Mini. The hardest part is still writing a good SOUL.md.</p>
+
+      <div class="post-footer-links">
+        <a href="https://github.com/friscobrisco/clawstainer">Clawstainer on GitHub</a> · <a href="https://github.com/openclaw/openclaw">OpenClaw</a> · <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>
+      </div>
+    </article>
+  </main>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="site-footer">
+    <div class="container">
+      <span class="footer-text">© 2026 Clawstainer. All rights reserved.</span>
+      <ul class="footer-links" role="list">
+        <li><a href="https://github.com/friscobrisco/clawstainer" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+        <li><a href="https://github.com/friscobrisco/clawstainer/blob/main/docs.md" target="_blank" rel="noopener noreferrer">Docs</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>

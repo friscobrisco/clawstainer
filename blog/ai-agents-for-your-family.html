@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Give Every Family Member Their Own AI Agent — Clawstainer</title>
+  <meta name="description" content="One machine, many sandboxes — personalized AI agents for every family member using Clawstainer.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="../base.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+  <!-- ==================== HEADER ==================== -->
+  <header class="site-header">
+    <div class="container">
+      <a href="../" class="logo-group" aria-label="Clawstainer home">
+        <svg width="180" height="40" viewBox="0 0 360 80" aria-hidden="true">
+          <rect x="56.00" y="36.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.60" transform="rotate(22.0 60.00 40.00)"/>
+          <rect x="50.14" y="50.14" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.75" transform="rotate(67.0 54.14 54.14)"/>
+          <rect x="36.00" y="56.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.95" transform="rotate(112.0 40.00 60.00)"/>
+          <rect x="21.86" y="50.14" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.75" transform="rotate(157.0 25.86 54.14)"/>
+          <rect x="16.00" y="36.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.60" transform="rotate(202.0 20.00 40.00)"/>
+          <rect x="21.86" y="21.86" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.40" transform="rotate(247.0 25.86 25.86)"/>
+          <rect x="36.00" y="16.00" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.40" transform="rotate(292.0 40.00 20.00)"/>
+          <rect x="50.14" y="21.86" width="8.00" height="8.00" rx="1.5" fill="currentColor" opacity="0.40" transform="rotate(337.0 54.14 25.86)"/>
+          <text x="76" y="47" font-family="'JetBrains Mono', monospace" font-size="30" font-weight="600" fill="currentColor" letter-spacing="-0.02em">clawstainer</text>
+        </svg>
+      </a>
+      <nav>
+        <ul class="nav-links" role="list">
+          <li><a href="../#how">How It Works</a></li>
+          <li><a href="../#use-cases">Use Cases</a></li>
+          <li><a href="../#fleet">Fleet</a></li>
+          <li><a href="./">Blog</a></li>
+          <li><a href="https://github.com/friscobrisco/clawstainer" target="_blank" rel="noopener noreferrer" class="btn-ghost">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="post-header">
+      <a href="./" class="post-back">← Back to blog</a>
+      <div class="post-meta">
+        <span class="blog-entry-date">2026-03-21</span>
+        <span class="blog-entry-tag">personal</span>
+      </div>
+      <h1>Give Every Family Member Their Own AI Agent</h1>
+    </div>
+
+    <article class="post-body">
+      <p>Your mom shouldn't have to learn the terminal to have an AI agent. Neither should your cousin, your partner, or your teenager who won't stop texting you questions they could Google. The promise of open-source agents like <a href="https://github.com/openclaw/openclaw">OpenClaw</a> and <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> is that anyone can run a personal AI — but the reality is that setting one up still requires comfort with config files, API keys, and Docker. That's the gap <a href="https://github.com/friscobrisco/clawstainer">Clawstainer</a> fills: lightweight, isolated Linux sandboxes you can spin up per person, snapshot when they're configured, and replicate in seconds.</p>
+
+      <p>This post walks through how to provision an agent for every member of your family — from the non-technical to the power user — using Clawstainer as the deployment layer.</p>
+
+      <h2>The Architecture: One Machine, Many Sandboxes</h2>
+
+      <p>The idea is simple. You run a single server (a VPS, a home lab box, a Mac Mini in the closet) and spin up one isolated sandbox per family member. Each sandbox gets its own agent runtime, its own personality files, its own memory, and its own messaging channel. Nobody's data leaks into anyone else's session.</p>
+
+      <p>Clawstainer uses <code>systemd-nspawn</code> under the hood — container-based isolation with its own filesystem, PID namespace, network namespace, and cgroup resource limits. Each sandbox boots in 2-3 seconds. On macOS, it runs transparently through Lima. On Linux, it runs natively.</p>
+
+<div class="diagram">┌──────────────────── Your Server ────────────────────┐
+│                                                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │  Mom         │  │  Partner    │  │  You         │  │
+│  │  OpenClaw    │  │  OpenClaw   │  │  Hermes      │  │
+│  │  WhatsApp    │  │  Telegram   │  │  Telegram    │  │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │
+│         │                │                │          │
+│         └────────────────┴────────────────┘          │
+│                    clawstainer                        │
+│           (isolated sandboxes per person)             │
+└──────────────────────────────────────────────────────┘</div>
+
+      <p>Sandboxes can't reach each other — iptables <code>FORWARD DROP</code> between them. They talk to the internet through NAT, but they're invisible to one another.</p>
+
+      <h2>Step 1: Install Clawstainer</h2>
+
+      <p>On macOS:</p>
+
+<pre><code>brew install lima
+cargo install --path .
+clawstainer create --name test-box   # just works</code></pre>
+
+      <p>On first run, Lima provisions an Ubuntu 24.04 VM with <code>systemd-nspawn</code> and builds the Linux binary automatically. Takes about two minutes once. After that, commands are instant.</p>
+
+      <p>On Linux (bare metal or VPS):</p>
+
+<pre><code>sudo apt-get install -y systemd-container debootstrap
+cargo install --path .
+sudo clawstainer create --name test-box</code></pre>
+
+      <p>No Docker, no Kubernetes, no YAML purgatory. One binary.</p>
+
+      <h2>Step 2: Create a Base Agent Sandbox and Snapshot It</h2>
+
+      <p>Clawstainer has built-in provisioning templates for popular AI agents. Create a sandbox, provision it with OpenClaw, and you have a fully configured agent environment:</p>
+
+<pre><code># Create a sandbox with enough resources for an agent gateway
+clawstainer create --name openclaw-base --memory 2048 --cpus 2 --linger
+
+# Provision it with OpenClaw (installs everything, sets up systemd service)
+clawstainer provision &lt;id&gt; --components openclaw</code></pre>
+
+      <p>The <code>--linger</code> flag is important. Without it, systemd may stop user sessions on logout/idle and kill the gateway process. With it, OpenClaw stays alive 24/7.</p>
+
+      <p>Behind the scenes, the <code>openclaw</code> component does everything:</p>
+
+<pre><code># From components.yaml — this is what 'provision --components openclaw' runs
+openclaw:
+  timeout: 600
+  install: |
+    apt-get update
+    apt-get install -y curl git
+    curl -fsSL https://openclaw.ai/install.sh | bash || true
+    cat &gt; /etc/systemd/system/openclaw-gateway.service &lt;&lt; 'UNIT'
+    [Unit]
+    Description=OpenClaw Gateway
+    After=network.target
+
+    [Service]
+    Type=simple
+    ExecStart=/usr/local/bin/openclaw gateway
+    Restart=always
+    RestartSec=3
+    Environment=HOME=/root
+    WorkingDirectory=/root
+
+    [Install]
+    WantedBy=multi-user.target
+    UNIT
+    systemctl daemon-reload
+    systemctl enable openclaw-gateway
+    systemctl start openclaw-gateway
+  verify: openclaw --version</code></pre>
+
+      <p>Now here's the key move. Once the base is provisioned and working, snapshot it:</p>
+
+<pre><code># Snapshot the fully provisioned sandbox
+clawstainer snapshot create &lt;id&gt; --name openclaw-ready</code></pre>
+
+      <p>This captures the overlay upper layer — all the installed packages, configs, the systemd service, everything — into a reusable tarball stored at <code>/var/lib/clawstainer/snapshots/</code>. Now you can stamp out new agents without re-provisioning:</p>
+
+<pre><code># Create a new sandbox from the snapshot — no re-provisioning needed
+clawstainer create --name mom-agent --from openclaw-ready --linger
+clawstainer create --name partner-agent --from openclaw-ready --linger
+clawstainer create --name teen-agent --from openclaw-ready --linger</code></pre>
+
+      <p>Each of those boots in 2-3 seconds with OpenClaw already installed and the gateway already running. No waiting for <code>apt-get</code>, no re-downloading anything. The snapshot layer sits between the base image and the new writable upper layer via OverlayFS.</p>
+
+      <p>Check what's running:</p>
+
+<pre><code>clawstainer list
+
+ID             NAME             STATUS     MEMORY   CPUS   UPTIME       IP
+sb-a1b2c3d4    mom-agent        running    2048MB   2      5m           10.0.0.2
+sb-e5f6g7h8    partner-agent    running    2048MB   2      5m           10.0.0.3
+sb-i9j0k1l2    teen-agent       running    2048MB   2      5m           10.0.0.4</code></pre>
+
+      <h2>Step 3: Personalize Each Agent</h2>
+
+      <p>Shell into each sandbox and configure the personality files. This is where each family member's agent becomes theirs.</p>
+
+<pre><code>clawstainer shell &lt;mom-agent-id&gt;</code></pre>
+
+      <h3>SOUL.md — Who the agent is</h3>
+
+      <p>For Mom:</p>
+
+<pre><code># Soul
+
+You are a helpful, patient assistant. Keep answers short and practical.
+Never use jargon. If something requires a technical step, walk through
+it like you're explaining to a friend over coffee.
+
+You help with:
+- Recipes and meal planning
+- Calendar and reminders
+- Travel research and booking
+- Answering general questions
+
+Speak in English and Spanish. Default to English unless spoken to in Spanish.</code></pre>
+
+      <p>For the teenager (with guardrails):</p>
+
+<pre><code># Soul
+
+You are a study buddy and homework helper. You explain concepts clearly
+and help brainstorm ideas, but you never write essays or complete
+assignments — you teach.
+
+Rules:
+- No generating full homework answers. Explain the method, not the solution.
+- Safe search only. Flag anything inappropriate.
+- Encourage curiosity. If they ask something interesting, go deeper.</code></pre>
+
+      <h3>USER.md — Who the person is</h3>
+
+<pre><code># User
+
+- Name: María
+- Timezone: America/Los_Angeles
+- Language preference: Spanish first, English fine
+- Communication style: Prefers voice messages, keep text replies brief
+- Important: Remind about medication at 9am and 9pm daily</code></pre>
+
+      <p>Then pair the messaging channel from inside the sandbox:</p>
+
+<pre><code># Inside the sandbox, pair WhatsApp for Mom
+openclaw channels login</code></pre>
+
+      <p>Exit the shell, and Mom's agent is live. She texts it on WhatsApp like she would any other contact.</p>
+
+      <h2>Step 4: Or Just Fleet It</h2>
+
+      <p>If you want to skip the manual create-per-person flow, Clawstainer has fleet management. Write a single YAML file and deploy the whole family at once:</p>
+
+<pre><code># family-fleet.yaml
+machines:
+  - name: mom-agent
+    count: 1
+    memory: 2048
+    cpus: 2
+    provision: openclaw
+    linger: true
+
+  - name: partner-agent
+    count: 1
+    memory: 2048
+    cpus: 2
+    provision: openclaw
+    linger: true
+
+  - name: teen-agent
+    count: 1
+    memory: 1024
+    cpus: 1
+    provision: openclaw
+    linger: true</code></pre>
+
+<pre><code># Create all machines, then provision in parallel
+clawstainer fleet create --file family-fleet.yaml --parallel 3</code></pre>
+
+      <p>Fleet uses a two-pass approach: creates all machines first (visible in <code>clawstainer list</code> immediately), then provisions them in parallel batches. Three agents provisioned at once.</p>
+
+      <p>Tear down a specific person's agent or the whole fleet:</p>
+
+<pre><code># Destroy one
+clawstainer fleet destroy --name teen-agent
+
+# Destroy all fleet machines
+clawstainer fleet destroy --all</code></pre>
+
+      <h2>Step 5: For the Savvy One — Hermes Agent</h2>
+
+      <p>If someone in your family is more technical (or if that someone is you), <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> is the upgrade. It's built by Nous Research and has something OpenClaw doesn't: a built-in learning loop. It creates skills from experience, improves them during use, and gets better the more you use it.</p>
+
+      <p>Clawstainer has a built-in component for it:</p>
+
+<pre><code>clawstainer create --name my-hermes --memory 2048 --cpus 2 --linger
+clawstainer provision &lt;id&gt; --components hermes-agent</code></pre>
+
+      <p>The <code>hermes-agent</code> component installs everything — Python, Node, the Hermes runtime, UV for dependency management:</p>
+
+<pre><code># From components.yaml
+hermes-agent:
+  install: |
+    apt-get update
+    apt-get install -y curl git xz-utils
+    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
+    cd /root/.hermes/hermes-agent && /root/.local/bin/uv pip install -r requirements.txt || true
+    printf '#!/bin/bash\ncd /root/.hermes/hermes-agent && source venv/bin/activate && python hermes "$@"\n' &gt; /usr/local/bin/hermes-agent
+    chmod +x /usr/local/bin/hermes-agent
+  verify: test -d /root/.hermes/hermes-agent && test -f /root/.local/bin/uv
+  timeout: 600</code></pre>
+
+      <p>Shell in, run the setup wizard, and connect your messaging platform:</p>
+
+<pre><code>clawstainer shell &lt;id&gt;
+hermes-agent setup    # walks through API keys, model selection
+hermes-agent gateway  # start the messaging gateway</code></pre>
+
+      <h3>Why Hermes for the power user</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>OpenClaw</th>
+              <th>Hermes Agent</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Learning loop</td>
+              <td>No — static skills</td>
+              <td>Yes — creates and improves skills from experience</td>
+            </tr>
+            <tr>
+              <td>Memory</td>
+              <td>File-based (Markdown)</td>
+              <td>Persistent multi-session project memory + skills</td>
+            </tr>
+            <tr>
+              <td>Tools</td>
+              <td>100+ built-in skills</td>
+              <td>40+ tools, subagents, cron, browser, MCP</td>
+            </tr>
+            <tr>
+              <td>Best for</td>
+              <td>Non-technical users who text their agent</td>
+              <td>Developers and power users who want a growing assistant</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Hermes also has native migration from OpenClaw, so if someone in the family levels up:</p>
+
+<pre><code>hermes claw migrate              # Interactive, imports everything
+hermes claw migrate --dry-run    # Preview what gets imported</code></pre>
+
+      <p>It brings over SOUL.md, memories, skills, messaging configs, and API keys.</p>
+
+      <p>You can also snapshot your configured Hermes sandbox the same way:</p>
+
+<pre><code>clawstainer snapshot create &lt;id&gt; --name hermes-ready</code></pre>
+
+      <p>Now you have two golden images — <code>openclaw-ready</code> and <code>hermes-ready</code> — and can stamp out either type in seconds.</p>
+
+      <h2>Monitoring the Family Fleet</h2>
+
+      <p>Check resource usage across all sandboxes:</p>
+
+<pre><code>clawstainer stats
+
+Host Disk: 6127 MB / 28690 MB (21.4%) -- 22547 MB available
+
+ID               NAME             STATUS           DISK
+sb-a1b2c3d4      mom-agent        running       1560 MB
+sb-e5f6g7h8      partner-agent    running        716 MB
+sb-i9j0k1l2      teen-agent       running        480 MB
+sb-m3n4o5p6      my-hermes        running       1890 MB</code></pre>
+
+      <p>Drill into a specific agent:</p>
+
+<pre><code>clawstainer stats sb-a1b2c3d4
+
+Sandbox: sb-a1b2c3d4
+Uptime:  up 2 hours, 15 minutes
+
+CPU:     12.3%
+Memory:  256.4 MB / 2048 MB (12.5%)
+Disk:    1560 MB / 8853 MB
+Procs:   8</code></pre>
+
+      <h2>Cost Reality</h2>
+
+      <p>Running family agents is cheaper than you'd think:</p>
+
+      <ul>
+        <li><strong>Hardware</strong>: A Mac Mini ($699 one-time), a $20-40/month VPS, or whatever Linux box you have sitting around</li>
+        <li><strong>API costs per agent</strong>: Light users (a few messages a day) run $5-20/month on Claude or GPT</li>
+        <li><strong>Clawstainer</strong>: Free. MIT licensed. No per-agent fees.</li>
+        <li><strong>OpenClaw / Hermes</strong>: Free. MIT licensed. You pay for the LLM provider, not the runtime.</li>
+      </ul>
+
+      <p>For a family of four with moderate usage, you're looking at $40-100/month total in API costs. That's the cost of a streaming subscription per person — except this one actually does things for you.</p>
+
+      <h2>What's Next</h2>
+
+      <p>Every person should have their own agent. Not a shared chatbot. Not a family account. A dedicated, persistent, personalized AI that knows their preferences, runs on their schedule, and talks to them where they already are.</p>
+
+      <p>Clawstainer makes that possible today. Snapshot once, deploy everywhere, sandbox everything, and let each person's agent grow with them — whether they're texting recipes to Mom on WhatsApp or you're running a self-improving Hermes instance that files your taxes while you sleep.</p>
+
+      <p>The tools are open source. The infrastructure is a single machine. The hardest part is writing a good SOUL.md.</p>
+
+      <div class="post-footer-links">
+        <a href="https://github.com/friscobrisco/clawstainer">Clawstainer on GitHub</a> · <a href="https://github.com/openclaw/openclaw">OpenClaw</a> · <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>
+      </div>
+    </article>
+  </main>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="site-footer">
+    <div class="container">
+      <span class="footer-text">© 2026 Clawstainer. All rights reserved.</span>
+      <ul class="footer-links" role="list">
+        <li><a href="https://github.com/friscobrisco/clawstainer" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+        <li><a href="https://github.com/friscobrisco/clawstainer/blob/main/docs.md" target="_blank" rel="noopener noreferrer">Docs</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>
