@@ -207,21 +207,6 @@ body {
   text-align: left;
 }
 
-.hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-3);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: 100px;
-  margin-bottom: var(--space-6);
-  letter-spacing: 0.04em;
-}
-
 .hero-kicker {
   font-family: var(--font-mono);
   font-size: var(--text-base);
@@ -325,95 +310,73 @@ body {
 }
 
 /* ============================================================
-   HOW IT WORKS — Stepped flow
+   HOW IT WORKS — Two-column with animated terminal
    ============================================================ */
-.how-flow {
-  display: flex;
-  flex-direction: column;
+.how-layout {
+  display: grid;
+  grid-template-columns: 1fr;
   gap: var(--space-8);
 }
 
+@media (min-width: 768px) {
+  .how-layout {
+    grid-template-columns: 1fr 1.3fr;
+    gap: var(--space-10);
+    align-items: start;
+  }
+}
+
+.how-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .how-step {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  gap: 0 var(--space-5);
-  align-items: start;
-  padding-bottom: var(--space-8);
-  border-bottom: 1px solid var(--color-divider);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  border-left: 2px solid transparent;
+  transition: border-color 0.3s ease, background 0.3s ease, opacity 0.3s ease;
+  opacity: 0.45;
 }
 
-.how-step:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
+.how-step--active {
+  border-left-color: var(--color-primary);
+  background: rgba(255, 255, 255, 0.02);
+  opacity: 1;
 }
 
-.how-step-number {
-  grid-row: 1 / 3;
-  font-family: var(--font-mono);
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  color: var(--color-text-muted);
-  opacity: 0.35;
-  line-height: 1;
-  padding-top: var(--space-1);
-}
-
-.how-step-content h3 {
+.how-step h3 {
   font-family: var(--font-display);
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
   font-weight: 500;
   color: var(--color-text);
   margin-bottom: var(--space-2);
 }
 
-.how-step-content p {
-  font-size: var(--text-base);
+.how-step p {
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
-  max-width: 56ch;
   line-height: 1.6;
 }
 
-.how-step-code {
-  grid-column: 2;
-  margin-top: var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+.how-terminal-wrap {
+  position: sticky;
+  top: calc(60px + var(--space-6));
 }
 
-.how-step-code code {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
+/* Animated terminal lines */
+.term-line {
+  transition: opacity 0.25s ease;
+  min-height: 1.7em;
+}
+
+.term-blank {
+  height: 0.85em;
+}
+
+.term-typed {
   color: var(--color-text-secondary);
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-  overflow-x: auto;
-}
-
-.how-step-code code + code {
-  margin-top: var(--space-1);
-}
-
-.how-step-code .prompt {
-  color: var(--color-text-muted);
-  user-select: none;
-}
-
-.how-step-code .flag {
-  color: var(--color-syntax-flag);
-}
-
-.how-step-code .string {
-  color: var(--color-syntax-string);
-}
-
-.how-step-code .comment {
-  color: var(--color-syntax-comment);
 }
 
 /* ============================================================
@@ -1016,12 +979,8 @@ body {
     font-size: var(--text-base);
   }
 
-  .how-step-number {
-    font-size: var(--text-xl);
-  }
-
-  .how-step-code code {
-    font-size: var(--text-xs);
+  .how-step {
+    padding: var(--space-3) var(--space-4);
   }
 
   .post-header h1 {

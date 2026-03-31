@@ -49,7 +49,6 @@
   <main>
     <section class="hero section" id="hero">
       <div class="container hero-content">
-        <span class="hero-badge">v0.1 · Built in Rust</span>
         <p class="hero-kicker">The CLI for your AI agent</p>
         <h1>Create, run, and destroy <span class="highlight">sandboxed agents</span> from your terminal</h1>
         <p class="hero-sub">No Docker. No cloud. One binary that boots isolated Linux environments in seconds — so every agent gets its own disposable sandbox.</p>
@@ -71,43 +70,49 @@
     <section class="section" id="how">
       <div class="container">
         <div class="section-label">
-          <span class="section-number">01</span>
           <span class="annotation">How It Works</span>
         </div>
 
-        <div class="how-flow">
-          <div class="how-step fade-in">
-            <div class="how-step-number">1</div>
-            <div class="how-step-content">
+        <div class="how-layout">
+          <div class="how-steps">
+            <div class="how-step" data-step="0">
               <h3>Create a sandbox</h3>
               <p>One command spins up an isolated Linux environment with its own filesystem, networking, and resource limits. Boots in 2-3 seconds.</p>
             </div>
-            <div class="how-step-code">
-              <code><span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">agent-box</span> <span class="flag">--memory</span> 2048 <span class="flag">--cpus</span> 2</code>
-            </div>
-          </div>
 
-          <div class="how-step fade-in">
-            <div class="how-step-number">2</div>
-            <div class="how-step-content">
+            <div class="how-step" data-step="1">
               <h3>Provision an agent</h3>
               <p>Built-in templates for Claude Code, Hermes, and OpenClaw. All dependencies included — one command from empty box to running agent.</p>
             </div>
-            <div class="how-step-code">
-              <code><span class="prompt">$ </span>clawstainer provision &lt;id&gt; <span class="flag">--components</span> <span class="string">claude-code</span></code>
+
+            <div class="how-step" data-step="2">
+              <h3>Use it, then destroy it</h3>
+              <p>Run commands, forward ports, copy files out. When done, tear it down — or snapshot it for instant reuse later.</p>
             </div>
           </div>
 
-          <div class="how-step fade-in">
-            <div class="how-step-number">3</div>
-            <div class="how-step-content">
-              <h3>Use it, then destroy it</h3>
-              <p>Run commands, install packages, forward ports, copy files in and out. When you're done, tear it down. Or snapshot it for instant reuse later.</p>
-            </div>
-            <div class="how-step-code">
-              <code><span class="prompt">$ </span>clawstainer exec &lt;id&gt; <span class="string">"python3 train.py"</span></code>
-              <code><span class="prompt">$ </span>clawstainer snapshot create &lt;id&gt; <span class="flag">--name</span> <span class="string">trained-model</span></code>
-              <code><span class="prompt">$ </span>clawstainer destroy &lt;id&gt;</code>
+          <div class="how-terminal-wrap">
+            <div class="terminal">
+              <div class="terminal-header">
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-title">terminal</span>
+              </div>
+              <div class="terminal-body" id="how-terminal">
+                <div class="term-line" data-step="0"><span class="prompt">$ </span><span class="term-typed"></span></div>
+                <div class="term-line term-output" data-step="0"><span class="comment">✓ Created agent-box in 1.2s</span></div>
+                <div class="term-line term-blank" data-step="0"></div>
+                <div class="term-line" data-step="1"><span class="prompt">$ </span><span class="term-typed"></span></div>
+                <div class="term-line term-output" data-step="1"><span class="comment">✓ Provisioned claude-code on agent-box</span></div>
+                <div class="term-line term-blank" data-step="1"></div>
+                <div class="term-line" data-step="2"><span class="prompt">$ </span><span class="term-typed"></span></div>
+                <div class="term-line term-output" data-step="2"><span class="comment">✓ Training complete — saved model.pt</span></div>
+                <div class="term-line" data-step="2"><span class="prompt">$ </span><span class="term-typed"></span></div>
+                <div class="term-line term-output" data-step="2"><span class="comment">✓ Snapshot trained-model created</span></div>
+                <div class="term-line" data-step="2"><span class="prompt">$ </span><span class="term-typed"></span></div>
+                <div class="term-line term-output" data-step="2"><span class="comment">✓ Destroyed agent-box</span></div>
+              </div>
             </div>
           </div>
         </div>
@@ -118,7 +123,6 @@
     <section class="section" id="use-cases">
       <div class="container">
         <div class="section-label">
-          <span class="section-number">02</span>
           <span class="annotation">Use Cases</span>
         </div>
 
@@ -289,7 +293,6 @@
     <section class="section fleet-section" id="fleet">
       <div class="container">
         <div class="section-label">
-          <span class="section-number">03</span>
           <span class="annotation">Fleet Management</span>
         </div>
 
@@ -377,5 +380,103 @@
     </div>
   </footer>
 
+  <script>
+  (function() {
+    const commands = [
+      // step 0: create
+      'clawstainer create --name agent-box --memory 2048 --cpus 2',
+      // step 1: provision
+      'clawstainer provision agent-box --components claude-code',
+      // step 2: use & destroy
+      'clawstainer exec agent-box "python3 train.py"',
+      'clawstainer snapshot create agent-box --name trained-model',
+      'clawstainer destroy agent-box'
+    ];
+
+    const stepMap = [0, 1, 2, 2, 2]; // which step index each command belongs to
+    const lines = document.querySelectorAll('#how-terminal .term-line');
+    const typedSpans = document.querySelectorAll('#how-terminal .term-typed');
+    const steps = document.querySelectorAll('.how-step[data-step]');
+    let started = false;
+
+    // Initially hide all lines
+    lines.forEach(l => l.style.opacity = '0');
+
+    function activateStep(idx) {
+      steps.forEach(s => s.classList.remove('how-step--active'));
+      if (steps[idx]) steps[idx].classList.add('how-step--active');
+    }
+
+    function typeText(span, text, speed) {
+      return new Promise(resolve => {
+        let i = 0;
+        function tick() {
+          if (i <= text.length) {
+            span.textContent = text.slice(0, i);
+            i++;
+            setTimeout(tick, speed);
+          } else {
+            resolve();
+          }
+        }
+        tick();
+      });
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function run() {
+      let cmdIdx = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const step = parseInt(line.dataset.step);
+        activateStep(step);
+
+        if (line.classList.contains('term-blank')) {
+          line.style.opacity = '1';
+          await sleep(100);
+          continue;
+        }
+
+        const typed = line.querySelector('.term-typed');
+        if (typed && cmdIdx < commands.length) {
+          line.style.opacity = '1';
+          await typeText(typed, commands[cmdIdx], 22);
+          cmdIdx++;
+          await sleep(250);
+          // Show the output line(s) that follow
+          let next = i + 1;
+          while (next < lines.length && lines[next].classList.contains('term-output')) {
+            lines[next].style.opacity = '1';
+            await sleep(350);
+            next++;
+          }
+          // Skip blanks after output
+          while (next < lines.length && lines[next].classList.contains('term-blank')) {
+            lines[next].style.opacity = '1';
+            next++;
+          }
+          i = next - 1; // -1 because loop increments
+          await sleep(400);
+        } else if (!typed) {
+          line.style.opacity = '1';
+          await sleep(100);
+        }
+      }
+    }
+
+    // Trigger on scroll into view
+    const terminal = document.getElementById('how-terminal');
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && !started) {
+        started = true;
+        activateStep(0);
+        run();
+        observer.disconnect();
+      }
+    }, { threshold: 0.3 });
+    observer.observe(terminal);
+  })();
+  </script>
 </body>
 </html>
