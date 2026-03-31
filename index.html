@@ -119,11 +119,18 @@
         </div>
 
         <h2 class="section-heading">What you build with disposable sandboxes</h2>
+      </div>
+    </section>
 
-        <!-- USE CASE A: Benchmark -->
-        <div class="use-case fade-in">
+    <!-- USE CASE A: Benchmark -->
+    <section class="uc-block uc-block--alt fade-in">
+      <div class="container">
+        <div class="uc-header">
+          <span class="uc-number">A</span>
+          <span class="use-case-tag">evaluation</span>
+        </div>
+        <div class="use-case">
           <div class="use-case-text">
-            <span class="use-case-tag">evaluation</span>
             <h3>Benchmark agent performance across LLMs</h3>
             <p>Spin up identical sandboxes for GPT-5, Claude, Gemini, and Llama — same environment, same task, different models. Compare token efficiency, tool use accuracy, and task completion rates in true isolation. No cross-contamination between runs.</p>
             <p class="use-case-detail">Define your benchmark matrix in a fleet YAML. Each model gets its own sandboxes with identical provisioning. Run them in parallel, collect results, destroy everything. Repeat with different prompts or tool configurations.</p>
@@ -156,14 +163,18 @@
             </div>
           </div>
         </div>
+      </div>
+    </section>
 
-        <!-- Divider -->
-        <div class="use-case-divider"></div>
-
-        <!-- USE CASE B: Team agents -->
-        <div class="use-case use-case--reverse fade-in">
+    <!-- USE CASE B: Team agents -->
+    <section class="uc-block fade-in">
+      <div class="container">
+        <div class="uc-header">
+          <span class="uc-number">B</span>
+          <span class="use-case-tag">team infra</span>
+        </div>
+        <div class="use-case use-case--reverse">
           <div class="use-case-text">
-            <span class="use-case-tag">team infra</span>
             <h3>Give everyone on your team their own agent</h3>
             <p>Each engineer, PM, or designer gets a persistent sandbox with their preferred AI agent pre-provisioned. Personal environments that don't step on each other — with resource limits enforced per box.</p>
             <p class="use-case-detail">Port-forward into any team member's sandbox for pair debugging. Snapshot a well-configured environment and clone it for new hires. Everyone's agent has root access to their box — and zero access to anyone else's.</p>
@@ -191,14 +202,18 @@
             </div>
           </div>
         </div>
+      </div>
+    </section>
 
-        <!-- Divider -->
-        <div class="use-case-divider"></div>
-
-        <!-- USE CASE C: Safe execution -->
-        <div class="use-case fade-in">
+    <!-- USE CASE C: Safe execution -->
+    <section class="uc-block uc-block--alt fade-in">
+      <div class="container">
+        <div class="uc-header">
+          <span class="uc-number">C</span>
+          <span class="use-case-tag">safety</span>
+        </div>
+        <div class="use-case">
           <div class="use-case-text">
-            <span class="use-case-tag">safety</span>
             <h3>Run untrusted code from LLM outputs</h3>
             <p>Let agents write and execute arbitrary code without risking your host machine. Every sandbox is disposable — if an agent <code style="color:var(--color-primary)">rm -rf</code>s everything, destroy it and spin up a fresh one in seconds.</p>
             <p class="use-case-detail">Namespace and cgroup isolation means a rogue agent can't escape its box. No shared filesystem, no network access to the host, no privilege escalation. The sandbox is the blast radius.</p>
@@ -223,14 +238,18 @@
             </div>
           </div>
         </div>
+      </div>
+    </section>
 
-        <!-- Divider -->
-        <div class="use-case-divider"></div>
-
-        <!-- USE CASE D: Local dev -->
-        <div class="use-case use-case--reverse fade-in">
+    <!-- USE CASE D: Local dev -->
+    <section class="uc-block fade-in">
+      <div class="container">
+        <div class="uc-header">
+          <span class="uc-number">D</span>
+          <span class="use-case-tag">development</span>
+        </div>
+        <div class="use-case use-case--reverse">
           <div class="use-case-text">
-            <span class="use-case-tag">development</span>
             <h3>Local AI agent development</h3>
             <p>Build and test agents without cloud costs. Iterate fast on your laptop — port-forward into the sandbox, watch logs in real time, copy artifacts out. Snapshot when something works. Move to production when ready.</p>
             <p class="use-case-detail">Works on macOS via Lima (one <code style="color:var(--color-primary)">brew install</code>) and natively on Linux. No cloud account, no billing dashboard, no cold starts. Your machine is the data center.</p>
@@ -259,7 +278,6 @@
             </div>
           </div>
         </div>
-
       </div>
     </section>
 
