@@ -222,13 +222,22 @@ body {
   letter-spacing: 0.04em;
 }
 
+.hero-kicker {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--color-primary);
+  letter-spacing: 0.02em;
+  margin-bottom: var(--space-4);
+}
+
 .hero h1 {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.15;
-  max-width: 18ch;
+  max-width: 20ch;
   margin-bottom: var(--space-5);
   letter-spacing: -0.02em;
 }
@@ -242,9 +251,32 @@ body {
   font-size: var(--text-lg);
   font-weight: 400;
   color: var(--color-text-secondary);
-  max-width: 50ch;
+  max-width: 52ch;
   line-height: 1.55;
-  margin-bottom: var(--space-8);
+  margin-bottom: var(--space-6);
+}
+
+.hero-install {
+  margin-bottom: var(--space-6);
+}
+
+.install-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: 400;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-5);
+}
+
+.install-prompt {
+  color: var(--color-text-muted);
+  user-select: none;
 }
 
 .hero-actions {
