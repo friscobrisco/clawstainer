@@ -4,8 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
+[![Open Source](https://img.shields.io/badge/open%20source-%E2%9C%93-brightgreen.svg)](https://github.com/friscobrisco/clawstainer)
 
 Lightweight, isolated Linux environments for AI agents. Spin up a sandbox in seconds, run commands, install packages, tear it down — all from a single CLI.
+
+> clawstainer is open source and MIT-licensed. Issues, ideas, and contributions are welcome on [GitHub](https://github.com/friscobrisco/clawstainer).
 
 Built in Rust. Two runtime backends:
 - **systemd-nspawn** — container-based, works everywhere including macOS via Lima
@@ -102,8 +105,8 @@ Built-in provisioning templates for popular AI agents:
 clawstainer create --name claude-box --memory 2048 --cpus 2
 clawstainer provision <id> --components claude-code
 
-# Hermes Agent (NousResearch)
-clawstainer create --name hermes-box --memory 2048 --cpus 2 --linger
+# Hermes Agent (NousResearch) — requires 4GB+ RAM
+clawstainer create --name hermes-box --memory 4096 --cpus 2 --linger
 clawstainer provision <id> --components hermes-agent
 
 # OpenClaw Gateway
@@ -154,6 +157,10 @@ Fleet create uses a two-pass approach: creates all machines first (visible in `l
 ## Documentation
 
 See [docs.md](docs.md) for the full CLI reference, architecture, and configuration.
+
+## Contributing
+
+clawstainer is open to contributions. If you have a bug report, feature request, or want to submit a pull request, head to the [GitHub repository](https://github.com/friscobrisco/clawstainer/issues).
 
 ## Author
 
