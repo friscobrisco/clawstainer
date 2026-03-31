@@ -53,10 +53,10 @@ button { cursor: pointer; background: none; border: none; }
 table { border-collapse: collapse; width: 100%; }
 
 a, button, [role="button"], [role="link"], input, textarea, select {
-  transition: color var(--transition-interactive),
-              background var(--transition-interactive),
-              border-color var(--transition-interactive),
-              box-shadow var(--transition-interactive);
+  transition: color var(--transition-fast, 150ms ease),
+              background var(--transition-fast, 150ms ease),
+              border-color var(--transition-fast, 150ms ease),
+              box-shadow var(--transition-fast, 150ms ease);
 }
 
 .sr-only {
