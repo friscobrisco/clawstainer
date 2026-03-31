@@ -36,7 +36,7 @@
       </a>
       <nav>
         <ul class="nav-links" role="list">
-          <li><a href="#features">Features</a></li>
+          <li><a href="#how">How It Works</a></li>
           <li><a href="#use-cases">Use Cases</a></li>
           <li><a href="#fleet">Fleet</a></li>
           <li><a href="https://github.com/friscobrisco/clawstainer" target="_blank" rel="noopener noreferrer" class="btn-ghost">GitHub</a></li>
@@ -51,150 +51,61 @@
       <div class="container hero-content">
         <span class="hero-badge">v0.1 · Built in Rust</span>
         <h1>Run untrusted AI agents safely in <span class="highlight">disposable sandboxes</span></h1>
-        <p class="hero-sub">No Docker. Boots in seconds. Local-first isolated Linux environments — containers or microVMs — spun up and torn down from a single CLI.</p>
+        <p class="hero-sub">No Docker. Boots in seconds. Local-first isolated Linux environments spun up and torn down from a single CLI.</p>
         <div class="hero-actions">
           <a href="https://github.com/friscobrisco/clawstainer" target="_blank" rel="noopener noreferrer" class="btn-primary">
             cargo install →
           </a>
-          <a href="#features" class="btn-ghost">
+          <a href="#how" class="btn-ghost">
             See how it works
           </a>
         </div>
-
-        <div class="hero-terminal" style="margin-top: var(--space-12); max-width: 640px;">
-          <div class="terminal">
-            <div class="terminal-header">
-              <span class="terminal-dot"></span>
-              <span class="terminal-dot"></span>
-              <span class="terminal-dot"></span>
-              <span class="terminal-title">terminal</span>
-            </div>
-            <div class="terminal-body">
-<code><span class="comment"># Create a sandbox in seconds</span>
-<span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">agent-box</span> <span class="flag">--memory</span> 2048
-<span class="comment"># ✓ Created agent-box (nspawn) in 2.3s</span>
-
-<span class="comment"># Provision with an AI agent template</span>
-<span class="prompt">$ </span>clawstainer provision &lt;id&gt; <span class="flag">--components</span> <span class="string">claude-code</span>
-<span class="comment"># ✓ Provisioned claude-code in agent-box</span>
-
-<span class="comment"># Done? Tear it down</span>
-<span class="prompt">$ </span>clawstainer destroy &lt;id&gt;
-<span class="comment"># ✓ Destroyed agent-box</span></code>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Decorative floating boxes -->
-      <div class="hero-illustration" aria-hidden="true">
-        <div class="iso-box"></div>
-        <div class="iso-box"></div>
-        <div class="iso-box"></div>
-        <div class="iso-box"></div>
-        <div class="iso-box"></div>
-        <div class="iso-line"></div>
-        <div class="iso-line"></div>
-        <div class="iso-line"></div>
       </div>
     </section>
 
-    <!-- ==================== FEATURES ==================== -->
-    <section class="section" id="features">
+    <!-- ==================== HOW IT WORKS ==================== -->
+    <section class="section" id="how">
       <div class="container">
         <div class="section-label">
           <span class="section-number">01</span>
-          <span class="annotation">Why Clawstainer</span>
+          <span class="annotation">How It Works</span>
         </div>
 
-        <h2 class="section-heading">Not Docker. Not slow. Not remote.</h2>
-        <p class="section-desc">Two runtime backends. Zero cloud dependency. Every sandbox is a fresh Linux environment with full package management, file I/O, and networking — isolated by default.</p>
+        <div class="how-flow">
+          <div class="how-step fade-in">
+            <div class="how-step-number">1</div>
+            <div class="how-step-content">
+              <h3>Create a sandbox</h3>
+              <p>One command spins up an isolated Linux environment with its own filesystem, networking, and resource limits. Boots in 2-3 seconds.</p>
+            </div>
+            <div class="how-step-code">
+              <code><span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">agent-box</span> <span class="flag">--memory</span> 2048 <span class="flag">--cpus</span> 2</code>
+            </div>
+          </div>
 
-        <div class="value-grid">
-          <div class="value-card fade-in">
-            <div class="value-card-icon">⚡</div>
-            <h3>125ms boot time</h3>
-            <p>Firecracker microVMs boot faster than you can blink. Nspawn containers take 2-3 seconds. Both faster than pulling a Docker image.</p>
+          <div class="how-step fade-in">
+            <div class="how-step-number">2</div>
+            <div class="how-step-content">
+              <h3>Provision an agent</h3>
+              <p>Built-in templates for Claude Code, Hermes, and OpenClaw. All dependencies included — one command from empty box to running agent.</p>
+            </div>
+            <div class="how-step-code">
+              <code><span class="prompt">$ </span>clawstainer provision &lt;id&gt; <span class="flag">--components</span> <span class="string">claude-code</span></code>
+            </div>
           </div>
-          <div class="value-card fade-in">
-            <div class="value-card-icon">{&nbsp;}</div>
-            <h3>Hardware isolation</h3>
-            <p>Firecracker gives each sandbox its own kernel. Nspawn uses namespace/cgroup isolation. Pick the security level your agents need.</p>
-          </div>
-          <div class="value-card fade-in">
-            <div class="value-card-icon">→</div>
-            <h3>Runs on your machine</h3>
-            <p>Native on Linux. Works on macOS via Lima — one <code style="color:var(--color-primary)">brew install</code> away. No cloud account, no billing dashboard, no cold starts.</p>
-          </div>
-          <div class="value-card fade-in">
-            <div class="value-card-icon">◇</div>
-            <h3>Snapshot & reuse</h3>
-            <p>Provision a sandbox once, snapshot it, spin up clones instantly. No re-downloading packages every time.</p>
-          </div>
-          <div class="value-card fade-in">
-            <div class="value-card-icon">⊞</div>
-            <h3>Fleet management</h3>
-            <p>Deploy 10, 50, or 200 agent sandboxes from a single YAML definition. Parallel provisioning. Destroy by group or all at once.</p>
-          </div>
-          <div class="value-card fade-in">
-            <div class="value-card-icon">☰</div>
-            <h3>Agent templates</h3>
-            <p>Built-in provisioning for Claude Code, Hermes, and OpenClaw. One command to go from empty box to running agent.</p>
-          </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- ==================== RUNTIME COMPARISON ==================== -->
-    <section class="section" id="runtimes">
-      <div class="container container--narrow">
-        <div class="section-label">
-          <span class="section-number">02</span>
-          <span class="annotation">Runtime Comparison</span>
-        </div>
-
-        <div class="fade-in" style="overflow-x: auto;">
-          <table class="comparison-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>nspawn (default)</th>
-                <th>Firecracker</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Isolation</td>
-                <td>Container (shared kernel)</td>
-                <td>VM (separate kernel)</td>
-              </tr>
-              <tr>
-                <td>Boot time</td>
-                <td>~2-3s</td>
-                <td>~125ms</td>
-              </tr>
-              <tr>
-                <td>Security</td>
-                <td>Namespace + cgroup</td>
-                <td>Hardware-enforced</td>
-              </tr>
-              <tr>
-                <td>macOS via Lima</td>
-                <td><span class="check">✓</span></td>
-                <td><span class="cross">—</span></td>
-              </tr>
-              <tr>
-                <td>Linux bare metal</td>
-                <td><span class="check">✓</span></td>
-                <td><span class="check">✓</span></td>
-              </tr>
-              <tr>
-                <td>/dev/kvm required</td>
-                <td><span class="cross">—</span></td>
-                <td><span class="check">✓</span></td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="how-step fade-in">
+            <div class="how-step-number">3</div>
+            <div class="how-step-content">
+              <h3>Use it, then destroy it</h3>
+              <p>Run commands, install packages, forward ports, copy files in and out. When you're done, tear it down. Or snapshot it for instant reuse later.</p>
+            </div>
+            <div class="how-step-code">
+              <code><span class="prompt">$ </span>clawstainer exec &lt;id&gt; <span class="string">"python3 train.py"</span></code>
+              <code><span class="prompt">$ </span>clawstainer snapshot create &lt;id&gt; <span class="flag">--name</span> <span class="string">trained-model</span></code>
+              <code><span class="prompt">$ </span>clawstainer destroy &lt;id&gt;</code>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -203,22 +114,22 @@
     <section class="section" id="use-cases">
       <div class="container">
         <div class="section-label">
-          <span class="section-number">03</span>
+          <span class="section-number">02</span>
           <span class="annotation">Use Cases</span>
         </div>
 
         <h2 class="section-heading">What you build with disposable sandboxes</h2>
 
-        <div class="use-cases-grid">
-
-          <!-- Featured: Benchmark -->
-          <div class="use-case-card use-case-featured fade-in" data-number="A">
-            <div>
-              <h3>Benchmark agent performance across LLMs</h3>
-              <p>Spin up identical sandboxes for GPT-5, Claude, Gemini, and Llama — same environment, same task, different models. Compare token efficiency, tool use accuracy, and task completion rates in true isolation. No cross-contamination between runs.</p>
-              <span class="use-case-tag">evaluation</span>
-            </div>
-            <div class="terminal" style="font-size: var(--text-xs);">
+        <!-- USE CASE A: Benchmark -->
+        <div class="use-case fade-in">
+          <div class="use-case-text">
+            <span class="use-case-tag">evaluation</span>
+            <h3>Benchmark agent performance across LLMs</h3>
+            <p>Spin up identical sandboxes for GPT-5, Claude, Gemini, and Llama — same environment, same task, different models. Compare token efficiency, tool use accuracy, and task completion rates in true isolation. No cross-contamination between runs.</p>
+            <p class="use-case-detail">Define your benchmark matrix in a fleet YAML. Each model gets its own sandboxes with identical provisioning. Run them in parallel, collect results, destroy everything. Repeat with different prompts or tool configurations.</p>
+          </div>
+          <div class="use-case-terminal">
+            <div class="terminal">
               <div class="terminal-header">
                 <span class="terminal-dot"></span>
                 <span class="terminal-dot"></span>
@@ -228,46 +139,127 @@
               <div class="terminal-body">
 <code><span class="comment">machines:</span>
   - <span class="flag">name:</span> <span class="string">bench-gpt5</span>
-    <span class="flag">count:</span> 3
+    <span class="flag">count:</span> 5
     <span class="flag">memory:</span> 2048
     <span class="flag">provision:</span> <span class="string">openclaw</span>
+
   - <span class="flag">name:</span> <span class="string">bench-claude</span>
-    <span class="flag">count:</span> 3
+    <span class="flag">count:</span> 5
     <span class="flag">memory:</span> 2048
-    <span class="flag">provision:</span> <span class="string">claude-code</span></code>
+    <span class="flag">provision:</span> <span class="string">claude-code</span>
+
+  - <span class="flag">name:</span> <span class="string">bench-llama</span>
+    <span class="flag">count:</span> 5
+    <span class="flag">memory:</span> 4096
+    <span class="flag">provision:</span> <span class="string">hermes-agent</span></code>
               </div>
             </div>
           </div>
+        </div>
 
-          <!-- Give team their own agent -->
-          <div class="use-case-card fade-in" data-number="B">
+        <!-- Divider -->
+        <div class="use-case-divider"></div>
+
+        <!-- USE CASE B: Team agents -->
+        <div class="use-case use-case--reverse fade-in">
+          <div class="use-case-text">
+            <span class="use-case-tag">team infra</span>
             <h3>Give everyone on your team their own agent</h3>
             <p>Each engineer, PM, or designer gets a persistent sandbox with their preferred AI agent pre-provisioned. Personal environments that don't step on each other — with resource limits enforced per box.</p>
-            <span class="use-case-tag">team infra</span>
+            <p class="use-case-detail">Port-forward into any team member's sandbox for pair debugging. Snapshot a well-configured environment and clone it for new hires. Everyone's agent has root access to their box — and zero access to anyone else's.</p>
           </div>
+          <div class="use-case-terminal">
+            <div class="terminal">
+              <div class="terminal-header">
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-title">terminal</span>
+              </div>
+              <div class="terminal-body">
+<code><span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">alice-agent</span> <span class="flag">--memory</span> 2048
+<span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">bob-agent</span> <span class="flag">--memory</span> 2048
+<span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">carol-agent</span> <span class="flag">--memory</span> 2048
 
-          <!-- Safe code execution -->
-          <div class="use-case-card fade-in" data-number="C">
-            <h3>Run untrusted code from LLM outputs</h3>
-            <p>Let agents write and execute code without risking your host machine. Every sandbox is disposable — if an agent <code style="color:var(--color-primary)">rm -rf</code>s everything, destroy it and spin up a fresh one.</p>
-            <span class="use-case-tag">safety</span>
+<span class="prompt">$ </span>clawstainer provision alice-agent <span class="flag">--components</span> <span class="string">claude-code</span>
+<span class="prompt">$ </span>clawstainer provision bob-agent <span class="flag">--components</span> <span class="string">hermes-agent</span>
+<span class="prompt">$ </span>clawstainer provision carol-agent <span class="flag">--components</span> <span class="string">openclaw</span>
+
+<span class="comment"># Pair debug with Alice</span>
+<span class="prompt">$ </span>clawstainer port-forward alice-agent <span class="string">8080:8080</span></code>
+              </div>
+            </div>
           </div>
-
-          <!-- CI/CD -->
-          <div class="use-case-card fade-in" data-number="D">
-            <h3>Ephemeral CI environments</h3>
-            <p>Replace heavyweight Docker-in-Docker CI with lightweight Clawstainer sandboxes. Snapshot your base image once, clone it for each job. Faster, simpler, more isolated.</p>
-            <span class="use-case-tag">devops</span>
-          </div>
-
-          <!-- Local AI dev -->
-          <div class="use-case-card fade-in" data-number="E">
-            <h3>Local AI agent development</h3>
-            <p>Build and test agents without cloud costs. Port-forward into the sandbox, iterate fast, snapshot when you have something working. Move to production when ready.</p>
-            <span class="use-case-tag">development</span>
-          </div>
-
         </div>
+
+        <!-- Divider -->
+        <div class="use-case-divider"></div>
+
+        <!-- USE CASE C: Safe execution -->
+        <div class="use-case fade-in">
+          <div class="use-case-text">
+            <span class="use-case-tag">safety</span>
+            <h3>Run untrusted code from LLM outputs</h3>
+            <p>Let agents write and execute arbitrary code without risking your host machine. Every sandbox is disposable — if an agent <code style="color:var(--color-primary)">rm -rf</code>s everything, destroy it and spin up a fresh one in seconds.</p>
+            <p class="use-case-detail">Namespace and cgroup isolation means a rogue agent can't escape its box. No shared filesystem, no network access to the host, no privilege escalation. The sandbox is the blast radius.</p>
+          </div>
+          <div class="use-case-terminal">
+            <div class="terminal">
+              <div class="terminal-header">
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-title">terminal</span>
+              </div>
+              <div class="terminal-body">
+<code><span class="comment"># Agent does something destructive</span>
+<span class="prompt">$ </span>clawstainer exec &lt;id&gt; <span class="string">"rm -rf /"</span>
+<span class="comment"># Host is untouched. Sandbox is toast.</span>
+
+<span class="comment"># Spin up a fresh one from snapshot</span>
+<span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">fresh-box</span> <span class="flag">--from</span> <span class="string">python3-ready</span>
+<span class="comment"># ✓ Created fresh-box in 0.8s (from snapshot)</span></code>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div class="use-case-divider"></div>
+
+        <!-- USE CASE D: Local dev -->
+        <div class="use-case use-case--reverse fade-in">
+          <div class="use-case-text">
+            <span class="use-case-tag">development</span>
+            <h3>Local AI agent development</h3>
+            <p>Build and test agents without cloud costs. Iterate fast on your laptop — port-forward into the sandbox, watch logs in real time, copy artifacts out. Snapshot when something works. Move to production when ready.</p>
+            <p class="use-case-detail">Works on macOS via Lima (one <code style="color:var(--color-primary)">brew install</code>) and natively on Linux. No cloud account, no billing dashboard, no cold starts. Your machine is the data center.</p>
+          </div>
+          <div class="use-case-terminal">
+            <div class="terminal">
+              <div class="terminal-header">
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-title">terminal</span>
+              </div>
+              <div class="terminal-body">
+<code><span class="comment"># Develop locally</span>
+<span class="prompt">$ </span>clawstainer create <span class="flag">--name</span> <span class="string">dev</span> <span class="flag">--memory</span> 4096 <span class="flag">--cpus</span> 4
+<span class="prompt">$ </span>clawstainer provision dev <span class="flag">--components</span> <span class="string">python3,git,curl</span>
+<span class="prompt">$ </span>clawstainer cp ./agent.py dev:/root/
+<span class="prompt">$ </span>clawstainer port-forward dev <span class="string">3000:3000</span>
+
+<span class="comment"># It works — snapshot it</span>
+<span class="prompt">$ </span>clawstainer snapshot create dev <span class="flag">--name</span> <span class="string">agent-v1</span>
+
+<span class="comment"># Check resource usage</span>
+<span class="prompt">$ </span>clawstainer stats dev</code>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -275,17 +267,17 @@
     <section class="section fleet-section" id="fleet">
       <div class="container">
         <div class="section-label">
-          <span class="section-number">04</span>
+          <span class="section-number">03</span>
           <span class="annotation">Fleet Management</span>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr; gap: var(--space-8); align-items: start;">
-          <div>
+        <div class="fleet-layout">
+          <div class="fleet-text">
             <h2 class="section-heading">One YAML. Hundreds of agents.</h2>
-            <p class="section-desc">Define your fleet in a declarative config. Clawstainer creates all machines first, then provisions them in parallel batches. Destroy by group or nuke everything.</p>
+            <p class="section-desc">Define your entire fleet in a declarative config. Clawstainer creates all machines first, then provisions them in parallel batches. Destroy by group or nuke everything.</p>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr; gap: var(--space-4);">
+          <div class="fleet-terminals">
             <div class="terminal fade-in">
               <div class="terminal-header">
                 <span class="terminal-dot"></span>
@@ -337,7 +329,6 @@
     <!-- ==================== CTA ==================== -->
     <section class="cta-section section">
       <div class="container">
-        <span class="section-number" style="display: block; margin-bottom: var(--space-4);">05</span>
         <h2>Start deploying agents</h2>
         <p>Open source. MIT licensed. One command to install.</p>
         <div class="cta-actions">
