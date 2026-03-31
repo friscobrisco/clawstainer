@@ -39,8 +39,8 @@
   --color-divider:         #E5E5E5;
 
   --color-text:            #1A1A1A;
-  --color-text-secondary:  #4A4A4A;
-  --color-text-muted:      #7A7A7A;
+  --color-text-secondary:  #333333;
+  --color-text-muted:      #5A5A5A;
 
   --color-primary:         #2E7CF6;
   --color-primary-light:   #4A9EF5;
@@ -341,7 +341,7 @@ body {
   border-radius: var(--radius-md);
   border-left: 2px solid transparent;
   transition: border-color 0.3s ease, background 0.3s ease, opacity 0.3s ease;
-  opacity: 0.4;
+  opacity: 0.7;
 }
 
 .how-step--active {
@@ -530,7 +530,7 @@ body {
 
 .use-case-detail {
   font-size: var(--text-sm) !important;
-  color: var(--color-text-muted) !important;
+  color: var(--color-text-secondary) !important;
 }
 
 /* ============================================================
@@ -610,7 +610,7 @@ body {
 .footer-text {
   font-family: var(--font-body);
   font-size: var(--text-xs);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 
 .footer-links {
