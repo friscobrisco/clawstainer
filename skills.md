@@ -1,5 +1,7 @@
 # clawstainer — AI Agent Skills Reference
 
+> Version 0.1.0
+
 Machine-readable reference for AI agents using clawstainer sandboxes. All commands default to `--format auto`: JSON when piped (typical agent usage), table in interactive terminals. Pass `--format json` explicitly to guarantee JSON output. Errors go to stderr as JSON with a non-zero exit code.
 
 ---

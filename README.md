@@ -1,5 +1,6 @@
-# clawstainer
+# clawstainer v0.1.0
 
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()

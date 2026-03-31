@@ -1,5 +1,7 @@
 # clawstainer Documentation
 
+> Version 0.1.0
+
 ## Overview
 
 clawstainer is a CLI tool that spins up disposable Linux sandboxes for AI agents. Each sandbox is an isolated machine with its own filesystem, network, and process space. Agents interact with sandboxes by executing commands and reading structured JSON output.
