@@ -420,7 +420,7 @@
           <!-- Pillar 1: Local-First -->
           <div class="pillar-card">
             <h3>Local-First<br>Infrastructure</h3>
-            <p>Your machine is the data center. No cloud account, no billing dashboard, no cold starts. One <code>cargo install</code> and you're running.</p>
+            <p>Runs on your machine. No cloud account needed, no billing surprises. Install with <code>cargo install</code>, create your first sandbox, and you're up.</p>
             <div class="pillar-visual">
               <svg class="pillar-svg" viewBox="0 0 320 200" aria-hidden="true">
                 <!-- Laptop outline -->
@@ -443,7 +443,7 @@
           <!-- Pillar 2: Sandboxed -->
           <div class="pillar-card">
             <h3>Complete Namespace<br>Isolation</h3>
-            <p>Every sandbox gets its own filesystem, network, and cgroups. A rogue agent can't escape — the sandbox is the blast radius.</p>
+            <p>Each sandbox has its own filesystem, network, and process space. If something breaks inside, nothing outside is affected.</p>
             <div class="pillar-visual">
               <svg class="pillar-svg" viewBox="0 0 320 200" aria-hidden="true">
                 <!-- Central sandbox box -->
@@ -468,7 +468,7 @@
           <!-- Pillar 3: Fleet -->
           <div class="pillar-card">
             <h3>Fleet Management<br>at Scale</h3>
-            <p>One YAML defines hundreds of agents. Parallel provisioning, group teardown, snapshot cloning — from one box to a thousand.</p>
+            <p>Define all your sandboxes in one YAML file. Clawstainer creates and provisions them in parallel. Tear down a group or everything at once.</p>
             <div class="pillar-visual">
               <svg class="pillar-svg" viewBox="0 0 320 200" aria-hidden="true">
                 <!-- Root node -->
@@ -521,20 +521,24 @@
     <!-- ==================== CONTACT STRIP ==================== -->
     <section class="contact-strip">
       <div class="container">
-        <div class="contact-layout">
-          <div class="contact-links">
-            <a href="#contact-form" class="contact-row" data-contact-trigger>
-              <span>Talk to Us</span>
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </a>
-            <a href="https://github.com/friscobrisco/clawstainer/blob/main/docs.md" target="_blank" rel="noopener noreferrer" class="contact-row">
-              <span>Read the Docs</span>
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </a>
-          </div>
-          <div class="contact-statement">
-            <span>Run AI agents<br>on Clawstainer</span>
-          </div>
+        <!-- Statement top -->
+        <div class="contact-hero">
+          <span class="contact-headline">Run AI agents<br>on Clawstainer</span>
+          <p class="contact-sub">Open-source. Local-first. Ready when you are.</p>
+        </div>
+
+        <!-- Action row -->
+        <div class="contact-actions">
+          <a href="#contact-form" class="contact-action-card" data-contact-trigger>
+            <span class="contact-action-label">Talk to Us</span>
+            <span class="contact-action-desc">Questions, partnerships, or just say hello</span>
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true" class="contact-arrow"><path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a href="https://github.com/friscobrisco/clawstainer/blob/main/docs.md" target="_blank" rel="noopener noreferrer" class="contact-action-card">
+            <span class="contact-action-label">Read the Docs</span>
+            <span class="contact-action-desc">Installation, CLI reference, fleet config</span>
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true" class="contact-arrow"><path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
         </div>
       </div>
 
