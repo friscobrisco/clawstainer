@@ -310,47 +310,91 @@
           <div class="section-label">
             <span class="annotation">Agent-Powered</span>
           </div>
-          <h2 class="section-heading agent-split-heading">Give your agent the power<br>to spin up sandboxes</h2>
+          <h2 class="section-heading agent-split-heading">Give your agent the superpower<br>to spin up its own infrastructure</h2>
           <div class="agent-split-points">
             <div class="agent-point">
               <span class="agent-point-num">01</span>
-              <p>Agent needs a clean environment? <strong>Create a sandbox in seconds.</strong></p>
+              <p>Agent needs a clean environment? <strong>It spins one up itself.</strong></p>
             </div>
             <div class="agent-point">
               <span class="agent-point-num">02</span>
-              <p>Task done? <strong>Destroy the sandbox.</strong> No cleanup needed.</p>
+              <p>Task done? <strong>It tears down the sandbox.</strong> No cleanup needed.</p>
             </div>
             <div class="agent-point">
               <span class="agent-point-num">03</span>
-              <p>Need to retry? <strong>Restore from snapshot</strong> and go again.</p>
+              <p>Need to retry? <strong>It restores from snapshot</strong> and goes again.</p>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Dark bottom half -->
+      <!-- Dark bottom half: conversational agent -->
       <div class="agent-split-bottom">
         <div class="agent-terminal-full">
           <div class="terminal-header">
             <span class="terminal-dot"></span>
             <span class="terminal-dot"></span>
             <span class="terminal-dot"></span>
-            <span class="terminal-title">agent workflow</span>
+            <span class="terminal-title">clawstainer agent session</span>
           </div>
-          <div class="terminal-body" id="agent-terminal">
-            <div class="aterm-line"><span class="comment"># Agent spins up an isolated sandbox</span></div>
-            <div class="aterm-line"><span class="prompt">$ </span><span class="aterm-typed"></span></div>
-            <div class="aterm-line aterm-output"><span class="comment">✓ Created task-7f3a in 0.8s (from snapshot)</span></div>
-            <div class="aterm-line aterm-blank"></div>
-            <div class="aterm-line"><span class="comment"># Runs untrusted code inside the sandbox</span></div>
-            <div class="aterm-line"><span class="prompt">$ </span><span class="aterm-typed"></span></div>
-            <div class="aterm-line aterm-output"><span class="comment">✓ Task complete — output saved</span></div>
-            <div class="aterm-line aterm-blank"></div>
-            <div class="aterm-line"><span class="comment"># Copies results out, then destroys the sandbox</span></div>
-            <div class="aterm-line"><span class="prompt">$ </span><span class="aterm-typed"></span></div>
-            <div class="aterm-line aterm-output"><span class="comment">✓ Copied results.json</span></div>
-            <div class="aterm-line"><span class="prompt">$ </span><span class="aterm-typed"></span></div>
-            <div class="aterm-line aterm-output"><span class="comment">✓ Destroyed task-7f3a</span></div>
+          <div class="agent-chat" id="agent-chat">
+
+            <!-- User message -->
+            <div class="achat-msg achat-user achat-hidden">
+              <span class="achat-role">›</span>
+              <span class="achat-text">run the benchmark suite on the new model</span>
+            </div>
+
+            <!-- Agent thinking -->
+            <div class="achat-msg achat-agent achat-hidden">
+              <span class="achat-role">●</span>
+              <span class="achat-text">I'll spin up an isolated sandbox for this. Let me create one from the python3-ready snapshot.</span>
+            </div>
+
+            <!-- Agent action -->
+            <div class="achat-action achat-hidden">
+              <span class="achat-action-label">sandbox</span>
+              <span class="achat-action-cmd">clawstainer create --name bench-a1f9 --from python3-ready</span>
+            </div>
+            <div class="achat-result achat-hidden">
+              <span class="achat-check">✓</span> Created bench-a1f9 in 0.8s
+            </div>
+
+            <!-- Agent continues -->
+            <div class="achat-msg achat-agent achat-hidden">
+              <span class="achat-role">●</span>
+              <span class="achat-text">Sandbox is up. Copying the benchmark files in and running the suite now.</span>
+            </div>
+
+            <!-- Agent action -->
+            <div class="achat-action achat-hidden">
+              <span class="achat-action-label">exec</span>
+              <span class="achat-action-cmd">clawstainer exec bench-a1f9 "python3 run_benchmarks.py --model new-v2"</span>
+            </div>
+            <div class="achat-result achat-hidden">
+              <span class="achat-check">✓</span> Benchmarks complete — results saved to /root/results.json
+            </div>
+
+            <!-- Agent wraps up -->
+            <div class="achat-msg achat-agent achat-hidden">
+              <span class="achat-role">●</span>
+              <span class="achat-text">Done. Pulling the results out and destroying the sandbox.</span>
+            </div>
+
+            <div class="achat-action achat-hidden">
+              <span class="achat-action-label">cleanup</span>
+              <span class="achat-action-cmd">clawstainer cp bench-a1f9:/root/results.json ./ && clawstainer destroy bench-a1f9</span>
+            </div>
+            <div class="achat-result achat-hidden">
+              <span class="achat-check">✓</span> Destroyed bench-a1f9
+            </div>
+
+            <!-- Agent final message -->
+            <div class="achat-msg achat-agent achat-hidden">
+              <span class="achat-role">●</span>
+              <span class="achat-text">Benchmark complete. The new model scores 94.2% accuracy, up from 91.7%. Results are in results.json.</span>
+            </div>
+
           </div>
         </div>
       </div>
@@ -685,82 +729,39 @@
     observer.observe(terminal);
   })();
 
-  // Agent terminal typing animation
+  // Agent chat reveal animation
   (function() {
-    const agentCmds = [
-      'clawstainer create --name task-7f3a --from python3-ready',
-      'clawstainer exec task-7f3a "python3 run_task.py"',
-      'clawstainer cp task-7f3a:/root/results.json ./',
-      'clawstainer destroy task-7f3a'
-    ];
+    const chat = document.getElementById('agent-chat');
+    if (!chat) return;
+    const items = chat.querySelectorAll('.achat-hidden');
+    let started = false;
 
-    const agentTerminal = document.getElementById('agent-terminal');
-    if (!agentTerminal) return;
-    const aLines = agentTerminal.querySelectorAll('.aterm-line');
-    let aStarted = false;
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    function aTypeText(span, text, speed) {
-      return new Promise(resolve => {
-        let i = 0;
-        function tick() {
-          if (i <= text.length) {
-            span.textContent = text.slice(0, i);
-            i++;
-            setTimeout(tick, speed);
-          } else { resolve(); }
+    async function revealChat() {
+      for (const item of items) {
+        // Different delays depending on element type
+        if (item.classList.contains('achat-user')) {
+          await sleep(400);
+        } else if (item.classList.contains('achat-agent')) {
+          await sleep(600);
+        } else if (item.classList.contains('achat-action')) {
+          await sleep(350);
+        } else if (item.classList.contains('achat-result')) {
+          await sleep(500);
         }
-        tick();
-      });
-    }
-
-    function aSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-    async function runAgent() {
-      let cmdIdx = 0;
-      for (let i = 0; i < aLines.length; i++) {
-        const line = aLines[i];
-
-        if (line.classList.contains('aterm-blank')) {
-          line.style.opacity = '1';
-          await aSleep(120);
-          continue;
-        }
-
-        const typed = line.querySelector('.aterm-typed');
-        if (typed && cmdIdx < agentCmds.length) {
-          line.style.opacity = '1';
-          await aTypeText(typed, agentCmds[cmdIdx], 20);
-          cmdIdx++;
-          await aSleep(300);
-          // Show output lines
-          let next = i + 1;
-          while (next < aLines.length && aLines[next].classList.contains('aterm-output')) {
-            aLines[next].style.opacity = '1';
-            await aSleep(400);
-            next++;
-          }
-          while (next < aLines.length && aLines[next].classList.contains('aterm-blank')) {
-            aLines[next].style.opacity = '1';
-            next++;
-          }
-          i = next - 1;
-          await aSleep(500);
-        } else if (!typed) {
-          // Comment lines
-          line.style.opacity = '1';
-          await aSleep(200);
-        }
+        item.classList.add('achat-visible');
       }
     }
 
-    const aObserver = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && !aStarted) {
-        aStarted = true;
-        runAgent();
-        aObserver.disconnect();
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && !started) {
+        started = true;
+        revealChat();
+        observer.disconnect();
       }
-    }, { threshold: 0.3 });
-    aObserver.observe(agentTerminal);
+    }, { threshold: 0.2 });
+    observer.observe(chat);
   })();
 
   // Contact form toggle

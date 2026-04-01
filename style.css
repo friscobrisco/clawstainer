@@ -636,21 +636,129 @@ body {
   overflow-x: auto;
 }
 
-.aterm-line {
+/* Agent chat conversation UI */
+.agent-chat {
+  padding: var(--space-6) var(--space-5);
+  background: var(--terminal-surface);
+  border: 1px solid var(--terminal-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-height: 320px;
+}
+
+.achat-hidden {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.achat-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Message rows */
+.achat-msg {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  line-height: 1.6;
+}
+
+.achat-role {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  width: 20px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.achat-user .achat-role {
+  color: var(--color-primary-light);
+}
+
+.achat-agent .achat-role {
+  color: var(--color-syntax-string);
+}
+
+.achat-user .achat-text {
+  color: #FFFFFF;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.achat-agent .achat-text {
+  color: rgba(255, 255, 255, 0.75);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+}
+
+/* Action blocks (the clawstainer commands the agent runs) */
+.achat-action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin-left: 32px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--terminal-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-x: auto;
+}
+
+.achat-action-label {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-primary-light);
+  background: rgba(46, 124, 246, 0.12);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.achat-action-cmd {
+  color: var(--terminal-muted);
   white-space: nowrap;
 }
 
-.aterm-blank {
-  height: var(--space-4);
+/* Result lines */
+.achat-result {
+  margin-left: 32px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--color-syntax-string);
+  padding-left: var(--space-4);
 }
 
-#agent-terminal .aterm-line {
-  opacity: 0;
-  transition: opacity 0.15s ease;
+.achat-check {
+  margin-right: var(--space-1);
 }
 
-#agent-terminal.aterm-active .aterm-line {
-  /* JS controls visibility */
+@media (max-width: 639px) {
+  .achat-action {
+    margin-left: 0;
+    font-size: 0.72rem;
+  }
+
+  .achat-result {
+    margin-left: 0;
+  }
+
+  .agent-chat {
+    padding: var(--space-5) var(--space-4);
+    gap: var(--space-4);
+    min-height: 280px;
+  }
 }
 
 /* ============================================================
