@@ -547,6 +547,113 @@ body {
 }
 
 /* ============================================================
+   AGENT-POWERED SPLIT SECTION
+   ============================================================ */
+.agent-split {
+  border-top: 1px solid var(--color-border);
+}
+
+.agent-split-top {
+  background: var(--color-bg);
+  padding: var(--space-16) 0 var(--space-12);
+}
+
+.agent-split-heading {
+  margin-bottom: var(--space-10);
+}
+
+.agent-split-points {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+}
+
+@media (min-width: 640px) {
+  .agent-split-points {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-8);
+  }
+}
+
+.agent-point {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.agent-point-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-primary);
+  letter-spacing: 0.08em;
+}
+
+.agent-point p {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+  margin: 0;
+}
+
+.agent-point p strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* Dark bottom half */
+.agent-split-bottom {
+  background: var(--terminal-bg);
+  padding: var(--space-10) 0 var(--space-12);
+}
+
+.agent-terminal-full {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
+.agent-terminal-full .terminal-header {
+  padding: var(--space-4) var(--space-5);
+  background: var(--terminal-surface);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border: 1px solid var(--terminal-border);
+  border-bottom: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.agent-terminal-full .terminal-body {
+  padding: var(--space-6) var(--space-5);
+  background: var(--terminal-surface);
+  border: 1px solid var(--terminal-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  overflow-x: auto;
+}
+
+.aterm-line {
+  white-space: nowrap;
+}
+
+.aterm-blank {
+  height: var(--space-4);
+}
+
+#agent-terminal .aterm-line {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+#agent-terminal.aterm-active .aterm-line {
+  /* JS controls visibility */
+}
+
+/* ============================================================
    FLEET
    ============================================================ */
 .fleet-section {
