@@ -7,6 +7,18 @@
   <meta name="description" content="Open-source Rust CLI for running AI agents in disposable sandboxes. No Docker. Boots in seconds. Local-first.">
   <meta property="og:title" content="Clawstainer — The CLI for AI Agent Sandboxes">
   <meta property="og:description" content="One CLI to create, provision, and destroy isolated sandboxes for your AI agents. Built in Rust.">
+  <meta property="og:image" content="./og-image.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Clawstainer — The CLI for AI Agent Sandboxes">
+  <meta name="twitter:description" content="One CLI to create, provision, and destroy isolated sandboxes for your AI agents. Built in Rust.">
+  <meta name="twitter:image" content="./og-image.png">
+  <meta name="theme-color" content="#F7F6F2">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -398,18 +410,154 @@
       </div>
     </section>
 
-    <!-- ==================== CTA ==================== -->
-    <section class="cta-section section">
+    <!-- ==================== FEATURE PILLARS ==================== -->
+    <section class="pillars-section section">
       <div class="container">
-        <h2>Start deploying agents</h2>
-        <p>Open source. MIT licensed. One command to install.</p>
-        <div class="cta-actions">
-          <a href="https://github.com/friscobrisco/clawstainer" target="_blank" rel="noopener noreferrer" class="btn-primary">
-            View on GitHub →
-          </a>
-          <a href="https://github.com/friscobrisco/clawstainer/blob/main/docs.md" target="_blank" rel="noopener noreferrer" class="btn-ghost">
-            Read the docs
-          </a>
+        <div class="section-label"><span class="annotation">Why Clawstainer</span></div>
+        <h2 class="section-heading">Local-first, sandboxed,<br>built for fleets.</h2>
+        <div class="pillars-grid">
+
+          <!-- Pillar 1: Local-First -->
+          <div class="pillar-card">
+            <h3>Local-First<br>Infrastructure</h3>
+            <p>Your machine is the data center. No cloud account, no billing dashboard, no cold starts. One <code>cargo install</code> and you're running.</p>
+            <div class="pillar-visual">
+              <svg class="pillar-svg" viewBox="0 0 320 200" aria-hidden="true">
+                <!-- Laptop outline -->
+                <rect x="60" y="30" width="200" height="130" rx="8" fill="none" stroke="var(--color-border)" stroke-width="1.5"/>
+                <rect x="40" y="160" width="240" height="8" rx="4" fill="var(--color-border)"/>
+                <!-- Boot timer -->
+                <text x="160" y="90" text-anchor="middle" font-family="var(--font-mono)" font-size="14" fill="var(--color-text-muted)">boot time</text>
+                <text x="160" y="130" text-anchor="middle" font-family="var(--font-display)" font-size="40" font-weight="700" fill="var(--color-primary)">
+                  <tspan class="boot-counter">2.1</tspan><tspan font-size="20" fill="var(--color-text-muted)">s</tspan>
+                </text>
+                <!-- Progress bar -->
+                <rect x="100" y="145" width="120" height="3" rx="1.5" fill="var(--color-surface-2)"/>
+                <rect x="100" y="145" width="0" height="3" rx="1.5" fill="var(--color-primary)" class="boot-bar">
+                  <animate attributeName="width" from="0" to="120" dur="2.1s" fill="freeze" begin="0s" repeatCount="indefinite"/>
+                </rect>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Pillar 2: Sandboxed -->
+          <div class="pillar-card">
+            <h3>Complete Namespace<br>Isolation</h3>
+            <p>Every sandbox gets its own filesystem, network, and cgroups. A rogue agent can't escape — the sandbox is the blast radius.</p>
+            <div class="pillar-visual">
+              <svg class="pillar-svg" viewBox="0 0 320 200" aria-hidden="true">
+                <!-- Central sandbox box -->
+                <rect x="110" y="50" width="100" height="80" rx="6" fill="var(--color-primary-muted)" stroke="var(--color-primary)" stroke-width="1.5"/>
+                <text x="160" y="80" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--color-primary)" letter-spacing="0.05em">SANDBOX</text>
+                <text x="160" y="100" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="var(--color-text-muted)">pid · net · mnt · usr</text>
+                <!-- Isolation boundary -->
+                <rect x="70" y="25" width="180" height="130" rx="10" fill="none" stroke="var(--color-border)" stroke-width="1" stroke-dasharray="6 4"/>
+                <!-- Labels outside -->
+                <text x="30" y="60" font-family="var(--font-mono)" font-size="9" fill="var(--color-text-muted)" text-anchor="end" transform="rotate(-90 30 60)">HOST</text>
+                <!-- Blocked arrows -->
+                <line x1="110" y1="90" x2="70" y2="90" stroke="var(--color-border)" stroke-width="1" stroke-dasharray="3 3"/>
+                <text x="60" y="87" text-anchor="middle" font-family="var(--font-mono)" font-size="14" fill="#D44">✕</text>
+                <line x1="210" y1="90" x2="250" y2="90" stroke="var(--color-border)" stroke-width="1" stroke-dasharray="3 3"/>
+                <text x="260" y="87" text-anchor="middle" font-family="var(--font-mono)" font-size="14" fill="#D44">✕</text>
+                <!-- Zero access label -->
+                <text x="160" y="178" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--color-text-muted)" letter-spacing="0.08em">NO ESCALATION · NO ESCAPE</text>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Pillar 3: Fleet -->
+          <div class="pillar-card">
+            <h3>Fleet Management<br>at Scale</h3>
+            <p>One YAML defines hundreds of agents. Parallel provisioning, group teardown, snapshot cloning — from one box to a thousand.</p>
+            <div class="pillar-visual">
+              <svg class="pillar-svg" viewBox="0 0 320 200" aria-hidden="true">
+                <!-- Root node -->
+                <rect x="135" y="15" width="50" height="24" rx="4" fill="var(--color-primary)" />
+                <text x="160" y="31" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="#fff" font-weight="600">FLEET</text>
+                <!-- Branches -->
+                <line x1="145" y1="39" x2="80" y2="65" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="160" y1="39" x2="160" y2="65" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="175" y1="39" x2="240" y2="65" stroke="var(--color-border)" stroke-width="1"/>
+                <!-- Group nodes -->
+                <rect x="50" y="65" width="60" height="20" rx="4" fill="var(--color-primary-muted)" stroke="var(--color-primary)" stroke-width="1"/>
+                <text x="80" y="79" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--color-primary)">hermes ×3</text>
+                <rect x="130" y="65" width="60" height="20" rx="4" fill="var(--color-primary-muted)" stroke="var(--color-primary)" stroke-width="1"/>
+                <text x="160" y="79" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--color-primary)">claude ×5</text>
+                <rect x="210" y="65" width="60" height="20" rx="4" fill="var(--color-primary-muted)" stroke="var(--color-primary)" stroke-width="1"/>
+                <text x="240" y="79" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--color-primary)">openclaw ×10</text>
+                <!-- Agent rows (hermes) -->
+                <line x1="65" y1="85" x2="65" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="80" y1="85" x2="80" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="95" y1="85" x2="95" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <rect x="57" y="100" width="16" height="12" rx="2" fill="var(--color-surface-2)" stroke="var(--color-border)" stroke-width="0.75"/>
+                <rect x="72" y="100" width="16" height="12" rx="2" fill="var(--color-surface-2)" stroke="var(--color-border)" stroke-width="0.75"/>
+                <rect x="87" y="100" width="16" height="12" rx="2" fill="var(--color-surface-2)" stroke="var(--color-border)" stroke-width="0.75"/>
+                <!-- Agent rows (claude) -->
+                <line x1="140" y1="85" x2="140" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="150" y1="85" x2="150" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="160" y1="85" x2="160" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="170" y1="85" x2="170" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <line x1="180" y1="85" x2="180" y2="100" stroke="var(--color-border)" stroke-width="1"/>
+                <rect x="132" y="100" width="16" height="12" rx="2" fill="var(--color-surface-2)" stroke="var(--color-border)" stroke-width="0.75"/>
+                <rect x="142" y="100" width="16" height="12" rx="2" fill="var(--color-surface-2)" stroke="var(--color-border)" stroke-width="0.75" transform="translate(5,0)"/>
+                <rect x="157" y="100" width="16" height="12" rx="2" fill="var(--color-surface-2)" stroke="var(--color-border)" stroke-width="0.75"/>
+                <rect x="167" y="100" width="16" height="12" rx="2" fill="var(--color-surface-2)" stroke="var(--color-border)" stroke-width="0.75" transform="translate(5,0)"/>
+                <!-- Status bar -->
+                <rect x="60" y="140" width="200" height="24" rx="4" fill="var(--terminal-bg)"/>
+                <text x="70" y="156" font-family="var(--font-mono)" font-size="9" fill="var(--color-syntax-string)">✓ 18 agents provisioned</text>
+                <text x="220" y="156" font-family="var(--font-mono)" font-size="9" fill="var(--terminal-muted)">--parallel 5</text>
+                <!-- Animated pulse on status -->
+                <circle cx="255" cy="152" r="3" fill="var(--color-syntax-string)">
+                  <animate attributeName="opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite"/>
+                </circle>
+              </svg>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== CONTACT STRIP ==================== -->
+    <section class="contact-strip">
+      <div class="container">
+        <div class="contact-layout">
+          <div class="contact-links">
+            <a href="#contact-form" class="contact-row" data-contact-trigger>
+              <span>Talk to Us</span>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <a href="https://github.com/friscobrisco/clawstainer/blob/main/docs.md" target="_blank" rel="noopener noreferrer" class="contact-row">
+              <span>Read the Docs</span>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+          </div>
+          <div class="contact-statement">
+            <span>Run AI agents<br>on Clawstainer</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contact form (hidden by default, toggled by "Talk to Us") -->
+      <div id="contact-form" class="contact-form-wrap" hidden>
+        <div class="container">
+          <form class="contact-form" action="#" method="POST">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="contact-name">Name</label>
+                <input type="text" id="contact-name" name="name" required placeholder="Your name">
+              </div>
+              <div class="form-group">
+                <label for="contact-email">Email</label>
+                <input type="email" id="contact-email" name="email" required placeholder="you@company.com">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="contact-message">Message</label>
+              <textarea id="contact-message" name="message" rows="4" required placeholder="How can we help?"></textarea>
+            </div>
+            <button type="submit" class="btn-primary">Send message →</button>
+          </form>
         </div>
       </div>
     </section>
@@ -523,6 +671,25 @@
       }
     }, { threshold: 0.3 });
     observer.observe(terminal);
+  })();
+
+  // Contact form toggle
+  (function() {
+    const trigger = document.querySelector('[data-contact-trigger]');
+    const form = document.getElementById('contact-form');
+    if (!trigger || !form) return;
+
+    trigger.addEventListener('click', function(e) {
+      e.preventDefault();
+      const isHidden = form.hasAttribute('hidden');
+      if (isHidden) {
+        form.removeAttribute('hidden');
+        form.querySelector('input')?.focus();
+        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        form.setAttribute('hidden', '');
+      }
+    });
   })();
   </script>
 </body>
