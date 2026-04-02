@@ -18,13 +18,26 @@ pub fn run(args: ListArgs, state: &StateStore) -> Result<()> {
 }
 
 fn print_list(args: &ListArgs, state: &StateStore) -> Result<()> {
-    let machines = state.with_read_lock(|s| {
+    let mut machines = state.with_read_lock(|s| {
         let mut machines: Vec<_> = s.machines.values().cloned().collect();
         if args.status != "all" {
             machines.retain(|m| m.status == args.status);
         }
         Ok(machines)
     })?;
+
+    for machine in &mut machines {
+        if machine.status != "running" {
+            continue;
+        }
+
+        let runtime = crate::runtime_for_machine(&machine.id, state);
+        *machine = state.reconcile_machine(&machine.id, runtime.as_ref())?;
+    }
+
+    if args.status != "all" {
+        machines.retain(|m| m.status == args.status);
+    }
 
     if output::resolve_format(&args.format) == "json" {
         output::print_json(&machines);

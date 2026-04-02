@@ -51,7 +51,6 @@ impl NspawnRuntime {
         caps.sort();
         caps
     }
-
 }
 
 impl Runtime for NspawnRuntime {
@@ -83,8 +82,9 @@ impl Runtime for NspawnRuntime {
         // Enable systemd lingering if requested
         if opts.linger {
             let linger_dir = root_path.join("var/lib/systemd/linger");
-            std::fs::create_dir_all(&linger_dir)
-                .map_err(|e| ClawError::CreateFailed(format!("Failed to create linger dir: {e}")))?;
+            std::fs::create_dir_all(&linger_dir).map_err(|e| {
+                ClawError::CreateFailed(format!("Failed to create linger dir: {e}"))
+            })?;
             std::fs::File::create(linger_dir.join("root"))
                 .map_err(|e| ClawError::CreateFailed(format!("Failed to enable linger: {e}")))?;
             eprint!(" linger ok,");
@@ -137,7 +137,9 @@ impl Runtime for NspawnRuntime {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
-            .map_err(|e| ClawError::CreateFailed(format!("Failed to launch systemd-nspawn: {e}")))?;
+            .map_err(|e| {
+                ClawError::CreateFailed(format!("Failed to launch systemd-nspawn: {e}"))
+            })?;
 
         let pid = child.id();
         let now = chrono::Utc::now();
@@ -236,11 +238,18 @@ impl Runtime for NspawnRuntime {
 
         // Set standard environment variables that scripts expect
         let home_buf = format!("/home/{}", opts.user);
-        let home = if opts.user == "root" { "/root" } else { &home_buf };
+        let home = if opts.user == "root" {
+            "/root"
+        } else {
+            &home_buf
+        };
         let default_env = [
             ("HOME", home.to_string()),
             ("USER", opts.user.clone()),
-            ("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()),
+            (
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+            ),
             ("LANG", "C.UTF-8".to_string()),
             ("TERM", "xterm-256color".to_string()),
         ];
@@ -258,7 +267,8 @@ impl Runtime for NspawnRuntime {
         cmd.arg("--");
         cmd.args(["sh", "-c", &opts.command]);
 
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| ClawError::ExecFailed(format!("Failed to execute systemd-run: {e}")))?;
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -304,10 +314,14 @@ impl Runtime for NspawnRuntime {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .status()
-            .map_err(|e| ClawError::ExecFailed(format!("Failed to launch machinectl shell: {e}")))?;
+            .map_err(|e| {
+                ClawError::ExecFailed(format!("Failed to launch machinectl shell: {e}"))
+            })?;
 
         if !status.success() {
-            return Err(ClawError::ExecFailed(format!("Shell exited with status: {status}")).into());
+            return Err(
+                ClawError::ExecFailed(format!("Shell exited with status: {status}")).into(),
+            );
         }
         Ok(())
     }
@@ -395,6 +409,14 @@ impl Runtime for NspawnRuntime {
             .args(["show", machine_id, "--property=State", "--property=Leader"])
             .output()
             .context("Failed to query machine status")?;
+
+        if !output.status.success() {
+            return Ok(MachineStatus {
+                id: machine_id.to_string(),
+                status: "stopped".to_string(),
+                pid: None,
+            });
+        }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut status = "unknown".to_string();
@@ -499,9 +521,10 @@ fn configure_container_network(machine_id: &str, ip: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(ClawError::CreateFailed(
-            format!("Failed to configure container networking: {stderr}")
-        ).into());
+        return Err(ClawError::CreateFailed(format!(
+            "Failed to configure container networking: {stderr}"
+        ))
+        .into());
     }
 
     Ok(())
@@ -555,9 +578,7 @@ fn inject_env_file(machine_id: &str, env_file_path: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(ClawError::CreateFailed(
-            format!("Failed to inject env file: {stderr}")
-        ).into());
+        return Err(ClawError::CreateFailed(format!("Failed to inject env file: {stderr}")).into());
     }
 
     Ok(())
@@ -565,10 +586,7 @@ fn inject_env_file(machine_id: &str, env_file_path: &str) -> Result<()> {
 
 fn read_cgroup_stats(machine_id: &str) -> (Option<u64>, Option<u64>) {
     let escaped_id = machine_id.replace('-', "\\x2d");
-    let cgroup_base = format!(
-        "/sys/fs/cgroup/machine.slice/machine-{}.scope",
-        escaped_id
-    );
+    let cgroup_base = format!("/sys/fs/cgroup/machine.slice/machine-{}.scope", escaped_id);
     let peak_memory = std::fs::read_to_string(format!("{}/memory.peak", cgroup_base))
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok());
