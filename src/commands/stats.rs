@@ -24,7 +24,7 @@ pub struct MachineStats {
 pub fn run(args: StatsArgs, runtime: &dyn Runtime, state: &StateStore) -> Result<()> {
     let machine_id = args.machine_id.as_ref().unwrap();
 
-    let machine = state.get_running_machine(machine_id)?;
+    let machine = state.get_running_machine_live(machine_id, runtime)?;
 
     if args.watch > 0 {
         loop {
@@ -92,14 +92,22 @@ fn print_global_stats(args: &StatsArgs, state: &StateStore) -> Result<()> {
     };
 
     // Get per-sandbox disk usage
-    let machines = state.with_read_lock(|s| Ok(s.machines.clone()))?;
+    let mut machines = state.with_read_lock(|s| Ok(s.machines.clone()))?;
+    let running_ids: Vec<String> = machines
+        .iter()
+        .filter_map(|(id, machine)| (machine.status == "running").then_some(id.clone()))
+        .collect();
+
+    for id in running_ids {
+        let runtime = crate::runtime_for_machine(&id, state);
+        let machine = state.reconcile_machine(&id, runtime.as_ref())?;
+        machines.insert(id, machine);
+    }
     let mut sandboxes = Vec::new();
 
     for (id, machine) in &machines {
         let machine_dir = format!("/var/lib/clawstainer/machines/{}", id);
-        let du_output = Command::new("du")
-            .args(["-sk", &machine_dir])
-            .output();
+        let du_output = Command::new("du").args(["-sk", &machine_dir]).output();
 
         let disk_used_mb = match du_output {
             Ok(o) if o.status.success() => {
@@ -107,7 +115,8 @@ fn print_global_stats(args: &StatsArgs, state: &StateStore) -> Result<()> {
                 s.split_whitespace()
                     .next()
                     .and_then(|v| v.parse::<f64>().ok())
-                    .unwrap_or(0.0) / 1024.0
+                    .unwrap_or(0.0)
+                    / 1024.0
             }
             _ => 0.0,
         };
@@ -150,24 +159,32 @@ fn print_global_stats(args: &StatsArgs, state: &StateStore) -> Result<()> {
     if output::resolve_format(&args.format) == "json" {
         output::print_json(&global);
     } else {
-        println!("Host Disk: {:.0} MB / {:.0} MB ({:.1}%) — {:.0} MB available",
-            global.host_disk_used_mb, global.host_disk_total_mb,
-            global.host_disk_percent, global.host_disk_avail_mb);
+        println!(
+            "Host Disk: {:.0} MB / {:.0} MB ({:.1}%) — {:.0} MB available",
+            global.host_disk_used_mb,
+            global.host_disk_total_mb,
+            global.host_disk_percent,
+            global.host_disk_avail_mb
+        );
         println!();
 
         if global.sandboxes.is_empty() {
             println!("No sandboxes running.");
         } else {
-            println!("{:<16} {:<16} {:<10} {:>14} {:>10}",
-                "ID", "NAME", "STATUS", "MEMORY", "DISK");
+            println!(
+                "{:<16} {:<16} {:<10} {:>14} {:>10}",
+                "ID", "NAME", "STATUS", "MEMORY", "DISK"
+            );
             for sb in &global.sandboxes {
                 let mem = if sb.status == "running" {
                     format!("{:.0}/{} MB", sb.memory_used_mb, sb.memory_limit_mb)
                 } else {
                     format!("{} MB", sb.memory_limit_mb)
                 };
-                println!("{:<16} {:<16} {:<10} {:>14} {:>8.0} MB",
-                    sb.machine_id, sb.name, sb.status, mem, sb.disk_used_mb);
+                println!(
+                    "{:<16} {:<16} {:<10} {:>14} {:>8.0} MB",
+                    sb.machine_id, sb.name, sb.status, mem, sb.disk_used_mb
+                );
             }
         }
     }
@@ -188,7 +205,11 @@ fn parse_df_output(output: &str) -> (f64, f64, f64) {
     (0.0, 0.0, 0.0)
 }
 
-fn collect_stats(machine_id: &str, memory_limit: &u32, runtime: &dyn Runtime) -> Result<MachineStats> {
+fn collect_stats(
+    machine_id: &str,
+    memory_limit: &u32,
+    runtime: &dyn Runtime,
+) -> Result<MachineStats> {
     let script = r#"
 echo "MEM_TOTAL:$(grep MemTotal /proc/meminfo | awk '{print $2}')"
 echo "MEM_AVAIL:$(grep MemAvailable /proc/meminfo | awk '{print $2}')"
@@ -200,13 +221,16 @@ sleep 0.1
 echo "CPU2:$(head -1 /proc/stat)"
 "#;
 
-    let result = runtime.exec(machine_id, ExecOpts {
-        command: script.to_string(),
-        timeout: 10,
-        workdir: "/root".to_string(),
-        env: HashMap::new(),
-        user: "root".to_string(),
-    })?;
+    let result = runtime.exec(
+        machine_id,
+        ExecOpts {
+            command: script.to_string(),
+            timeout: 10,
+            workdir: "/root".to_string(),
+            env: HashMap::new(),
+            user: "root".to_string(),
+        },
+    )?;
 
     let stdout = &result.stdout;
 
@@ -233,7 +257,8 @@ echo "CPU2:$(head -1 /proc/stat)"
     let (disk_used_mb, disk_total_mb) = parse_disk(stdout);
 
     // Parse uptime
-    let uptime = stdout.lines()
+    let uptime = stdout
+        .lines()
         .find(|l| l.starts_with("UPTIME:"))
         .map(|l| l.trim_start_matches("UPTIME:").trim().to_string())
         .unwrap_or_else(|| "-".to_string());
@@ -260,10 +285,7 @@ fn print_stats(stats: &MachineStats, format: &str) {
     println!("Sandbox: {}", stats.machine_id);
     println!("Uptime:  {}", stats.uptime);
     println!();
-    println!(
-        "CPU:     {:.1}%",
-        stats.cpu_percent
-    );
+    println!("CPU:     {:.1}%", stats.cpu_percent);
     println!(
         "Memory:  {:.1} MB / {} MB ({:.1}%)",
         stats.memory_used_mb, stats.memory_limit_mb, stats.memory_percent
@@ -276,14 +298,16 @@ fn print_stats(stats: &MachineStats, format: &str) {
 }
 
 fn parse_field(stdout: &str, prefix: &str) -> u64 {
-    stdout.lines()
+    stdout
+        .lines()
         .find(|l| l.starts_with(prefix))
         .and_then(|l| l.trim_start_matches(prefix).trim().parse().ok())
         .unwrap_or(0)
 }
 
 fn parse_cpu_line(stdout: &str, prefix: &str) -> Vec<u64> {
-    stdout.lines()
+    stdout
+        .lines()
         .find(|l| l.starts_with(prefix))
         .map(|l| {
             l.trim_start_matches(prefix)
@@ -315,12 +339,11 @@ fn calculate_cpu_percent(cpu1: &[u64], cpu2: &[u64]) -> f64 {
 }
 
 fn parse_disk(stdout: &str) -> (f64, f64) {
-    stdout.lines()
+    stdout
+        .lines()
         .find(|l| l.starts_with("DISK:"))
         .map(|l| {
-            let parts: Vec<&str> = l.trim_start_matches("DISK:")
-                .split_whitespace()
-                .collect();
+            let parts: Vec<&str> = l.trim_start_matches("DISK:").split_whitespace().collect();
             if parts.len() >= 4 {
                 let total: f64 = parts[1].parse().unwrap_or(0.0) / 1024.0;
                 let used: f64 = parts[2].parse().unwrap_or(0.0) / 1024.0;

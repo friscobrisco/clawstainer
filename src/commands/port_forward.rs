@@ -9,17 +9,24 @@ pub fn run(args: PortForwardArgs, state: &StateStore) -> Result<()> {
     // Parse port mapping
     let (host_port, sandbox_port) = parse_port(&args.port)?;
 
-    let ip = state.get_machine_ip(&args.machine_id)?;
+    let runtime = crate::runtime_for_machine(&args.machine_id, state);
+    let ip = state.get_machine_ip_live(&args.machine_id, runtime.as_ref())?;
 
     // Add DNAT rule: forward host_port -> sandbox_ip:sandbox_port
     let status = Command::new("iptables")
         .args([
-            "-t", "nat",
-            "-A", "PREROUTING",
-            "-p", "tcp",
-            "--dport", &host_port.to_string(),
-            "-j", "DNAT",
-            "--to-destination", &format!("{ip}:{sandbox_port}"),
+            "-t",
+            "nat",
+            "-A",
+            "PREROUTING",
+            "-p",
+            "tcp",
+            "--dport",
+            &host_port.to_string(),
+            "-j",
+            "DNAT",
+            "--to-destination",
+            &format!("{ip}:{sandbox_port}"),
         ])
         .status();
 
@@ -27,12 +34,18 @@ pub fn run(args: PortForwardArgs, state: &StateStore) -> Result<()> {
         // Also add for locally-originated traffic
         let _ = Command::new("iptables")
             .args([
-                "-t", "nat",
-                "-A", "OUTPUT",
-                "-p", "tcp",
-                "--dport", &host_port.to_string(),
-                "-j", "DNAT",
-                "--to-destination", &format!("{ip}:{sandbox_port}"),
+                "-t",
+                "nat",
+                "-A",
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "--dport",
+                &host_port.to_string(),
+                "-j",
+                "DNAT",
+                "--to-destination",
+                &format!("{ip}:{sandbox_port}"),
             ])
             .status();
     }
@@ -40,11 +53,16 @@ pub fn run(args: PortForwardArgs, state: &StateStore) -> Result<()> {
     // Allow forwarding to this destination
     let _ = Command::new("iptables")
         .args([
-            "-A", "FORWARD",
-            "-p", "tcp",
-            "-d", &ip,
-            "--dport", &sandbox_port.to_string(),
-            "-j", "ACCEPT",
+            "-A",
+            "FORWARD",
+            "-p",
+            "tcp",
+            "-d",
+            &ip,
+            "--dport",
+            &sandbox_port.to_string(),
+            "-j",
+            "ACCEPT",
         ])
         .status();
 
@@ -59,13 +77,16 @@ pub fn run(args: PortForwardArgs, state: &StateStore) -> Result<()> {
 
 fn parse_port(port_str: &str) -> Result<(u16, u16)> {
     if let Some((host, sandbox)) = port_str.split_once(':') {
-        let h: u16 = host.parse()
+        let h: u16 = host
+            .parse()
             .map_err(|_| ClawError::ExecFailed(format!("Invalid host port: {host}")))?;
-        let s: u16 = sandbox.parse()
+        let s: u16 = sandbox
+            .parse()
             .map_err(|_| ClawError::ExecFailed(format!("Invalid sandbox port: {sandbox}")))?;
         Ok((h, s))
     } else {
-        let p: u16 = port_str.parse()
+        let p: u16 = port_str
+            .parse()
             .map_err(|_| ClawError::ExecFailed(format!("Invalid port: {port_str}")))?;
         Ok((p, p))
     }
