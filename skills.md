@@ -287,6 +287,23 @@ clawstainer shell <MACHINE_ID> [--user <USER>]
 
 ---
 
+## Lima VM Management (macOS only)
+
+These commands run on the macOS host rather than inside Lima:
+
+```bash
+clawstainer vm status
+clawstainer vm start
+clawstainer vm stop [--force]
+clawstainer vm rebuild
+clawstainer vm repair
+clawstainer vm recreate [--force] [--yes]
+```
+
+`rebuild` preserves the VM and all sandboxes. `repair` only removes a stale Lima host-agent PID file after verifying its process is dead. `recreate` permanently deletes all sandbox and snapshot data inside the VM, refuses when sandboxes exist unless `--force` is supplied, and requires confirmation unless `--yes` is supplied.
+
+---
+
 ## Error Codes
 
 All errors return JSON to stderr:
@@ -309,6 +326,7 @@ All errors return JSON to stderr:
 | 10 | `permission_denied` | Needs root |
 | 11 | `copy_failed` | File copy failed |
 | 12 | `snapshot_failed` | Snapshot operation failed |
+| 13 | `vm_error` | Lima VM management operation failed |
 
 ---
 

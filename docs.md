@@ -820,6 +820,34 @@ clawstainer fleet destroy --all
 
 ---
 
+### `clawstainer vm`
+
+Manage the persistent Lima VM used by clawstainer on macOS. These commands run directly on the macOS host, so they remain available when the VM is stopped or needs repair.
+
+```bash
+clawstainer vm status [--format auto|table|json]
+clawstainer vm start [--format auto|table|json]
+clawstainer vm stop [--force] [--format auto|table|json]
+clawstainer vm rebuild [--format auto|table|json]
+clawstainer vm repair [--format auto|table|json]
+clawstainer vm recreate [--force] [--yes] [--format auto|table|json]
+```
+
+| Command | Behavior |
+|---------|----------|
+| `status` | Reports Lima status and resources without starting the VM |
+| `start` | Starts the existing VM or creates it on first use |
+| `stop` | Stops the VM while preserving its disk and all sandbox data |
+| `rebuild` | Forces a rebuild of the Linux clawstainer binary; preserves VM and sandbox data |
+| `repair` | Removes `ha.pid` only after confirming its process is dead; never deletes the VM |
+| `recreate` | Deletes and recreates the entire Lima VM |
+
+`recreate` is destructive: every sandbox, snapshot, execution log, and state record inside Lima is lost. If sandboxes exist, the command refuses unless `--force` is passed. It prompts for the word `recreate` unless `--yes` is supplied; non-interactive use requires `--yes`.
+
+On Linux, these commands return an error because clawstainer runs directly without Lima.
+
+---
+
 ## Error Handling
 
 All errors are returned as JSON to stderr with a non-zero exit code:
@@ -849,6 +877,7 @@ All errors are returned as JSON to stderr with a non-zero exit code:
 | 10 | `permission_denied` | Needs root or wrong group |
 | 11 | `copy_failed` | File copy operation failed |
 | 12 | `snapshot_failed` | Snapshot operation failed |
+| 13 | `vm_error` | Lima VM management operation failed |
 
 ---
 
@@ -870,7 +899,7 @@ On macOS, the CLI detects it's not on Linux and transparently:
 3. Re-executes the same command inside the VM via `limactl shell`
 4. Passes stdout/stderr/exit code back to the user
 
-You never interact with Lima directly. The project directory is mounted writable in the VM, so state is shared.
+Normal sandbox commands never require direct `limactl` use. Use `clawstainer vm status|start|stop|rebuild|repair|recreate` for host-level Lima management. The project directory is mounted writable in the VM, while sandbox state and storage live inside the VM.
 
 ### Isolation layers
 

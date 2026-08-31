@@ -22,8 +22,17 @@ use runtime::Runtime;
 use state::StateStore;
 
 fn main() {
-    // On macOS, transparently proxy all commands into a Lima Linux VM
+    // Parse first so host-only VM management and --version work even when
+    // the Lima VM is stopped or broken.
+    let cli = Cli::parse();
+
+    // On macOS, handle Lima lifecycle commands on the host. All sandbox
+    // commands continue to proxy transparently into the Linux VM.
     if lima::needs_proxy() {
+        if let Commands::Vm(args) = &cli.command {
+            exit_on_error(commands::vm::run(args));
+            return;
+        }
         if let Err(e) = lima::proxy_to_vm() {
             CliError::new("runtime_unavailable", format!("{e:#}")).exit();
         }
@@ -31,8 +40,6 @@ fn main() {
     }
 
     // On Linux, run directly
-    let cli = Cli::parse();
-
     let state = match StateStore::new() {
         Ok(s) => s,
         Err(e) => {
@@ -105,8 +112,13 @@ fn main() {
                 }
             }
         }
+        Commands::Vm(args) => commands::vm::run(&args),
     };
 
+    exit_on_error(result);
+}
+
+fn exit_on_error(result: anyhow::Result<()>) {
     if let Err(e) = result {
         if let Some(claw_err) = e.downcast_ref::<ClawError>() {
             let mut cli_err = CliError::new(claw_err.code(), claw_err.to_string());

@@ -68,6 +68,19 @@ On first run, Lima provisions an Ubuntu 24.04 VM with `systemd-nspawn` and build
 
 > **Note**: Only the nspawn runtime works on macOS. Firecracker requires hardware virtualization (KVM), which isn't available inside Lima VMs on Apple Silicon due to the lack of nested virtualization.
 
+Manage the local Lima VM through clawstainer itself:
+
+```bash
+clawstainer vm status             # Does not start the VM
+clawstainer vm start              # Creates it on first use
+clawstainer vm stop               # Preserves all VM data
+clawstainer vm rebuild            # Rebuilds the Linux CLI, preserves sandboxes
+clawstainer vm repair             # Removes a confirmed-stale Lima PID file
+clawstainer vm recreate           # Destructive; requires confirmation
+```
+
+`vm recreate` deletes every sandbox, snapshot, log, and state record stored inside the Lima VM. It refuses to proceed when sandboxes exist unless `--force` is supplied, and non-interactive use also requires `--yes`.
+
 ### Linux (bare metal or VM)
 
 Runs natively with no VM layer. Both runtimes are available.

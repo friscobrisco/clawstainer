@@ -10,3 +10,4 @@ pub mod provision;
 pub mod shell;
 pub mod snapshot;
 pub mod stats;
+pub mod vm;

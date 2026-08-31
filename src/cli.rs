@@ -47,6 +47,52 @@ pub enum Commands {
 
     /// Manage fleets of sandboxes from a YAML definition
     Fleet(FleetArgs),
+
+    /// Manage the local Lima VM used on macOS
+    Vm(VmArgs),
+}
+
+#[derive(clap::Args)]
+pub struct VmArgs {
+    #[command(subcommand)]
+    pub command: VmCommands,
+
+    /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
+    #[arg(long, default_value = "auto", global = true)]
+    pub format: String,
+}
+
+#[derive(Subcommand)]
+pub enum VmCommands {
+    /// Show the Lima VM status without starting it
+    Status,
+
+    /// Start the Lima VM, creating it if necessary
+    Start,
+
+    /// Stop the Lima VM without deleting its data
+    Stop {
+        /// Force the VM to stop
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Rebuild the Linux clawstainer binary while preserving VM data
+    Rebuild,
+
+    /// Remove stale Lima coordination files after verifying their process is dead
+    Repair,
+
+    /// Delete and recreate the Lima VM (destroys all sandboxes and snapshots)
+    Recreate {
+        /// Skip the interactive confirmation prompt
+        #[arg(long)]
+        yes: bool,
+
+        /// Allow recreation when sandboxes exist or their state cannot be inspected
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(clap::Args)]
@@ -340,4 +386,47 @@ pub struct StatsArgs {
     /// Output format: "auto" (table for TTY, json for pipes) | "table" | "json"
     #[arg(long, default_value = "auto")]
     pub format: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parses_vm_status() {
+        let cli = Cli::try_parse_from(["clawstainer", "vm", "status"]).unwrap();
+        match cli.command {
+            Commands::Vm(VmArgs {
+                command: VmCommands::Status,
+                format,
+            }) => assert_eq!(format, "auto"),
+            _ => panic!("expected vm status"),
+        }
+    }
+
+    #[test]
+    fn parses_guarded_vm_recreate() {
+        let cli = Cli::try_parse_from([
+            "clawstainer",
+            "vm",
+            "recreate",
+            "--force",
+            "--yes",
+            "--format",
+            "json",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Vm(VmArgs {
+                command: VmCommands::Recreate { yes, force },
+                format,
+            }) => {
+                assert!(yes);
+                assert!(force);
+                assert_eq!(format, "json");
+            }
+            _ => panic!("expected vm recreate"),
+        }
+    }
 }
