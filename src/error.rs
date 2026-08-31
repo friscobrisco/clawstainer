@@ -34,6 +34,9 @@ pub enum ClawError {
 
     #[error("Snapshot failed: {0}")]
     SnapshotFailed(String),
+
+    #[error("Lima VM operation failed: {0}")]
+    VmError(String),
 }
 
 impl ClawError {
@@ -51,6 +54,7 @@ impl ClawError {
             Self::PermissionDenied(_) => "permission_denied",
             Self::CopyFailed(_) => "copy_failed",
             Self::SnapshotFailed(_) => "snapshot_failed",
+            Self::VmError(_) => "vm_error",
         }
     }
 
@@ -68,6 +72,7 @@ impl ClawError {
             Self::PermissionDenied(_) => 10,
             Self::CopyFailed(_) => 11,
             Self::SnapshotFailed(_) => 12,
+            Self::VmError(_) => 13,
         }
     }
 
@@ -78,8 +83,11 @@ impl ClawError {
             Self::MachineNotRunning(_, _) => Some("The machine may have been stopped or destroyed"),
             Self::RuntimeUnavailable(_) => Some("clawstainer requires Linux with systemd-nspawn"),
             Self::ExecTimeout(_) => Some("Use --timeout to increase the limit"),
-            Self::ProvisionFailed(_) => Some("Check component names with 'clawstainer provision --help'"),
+            Self::ProvisionFailed(_) => {
+                Some("Check component names with 'clawstainer provision --help'")
+            }
             Self::CopyFailed(_) => Some("Check paths and ensure machine is running"),
+            Self::VmError(_) => Some("Run 'clawstainer vm status' to inspect the Lima VM"),
             _ => None,
         }
     }

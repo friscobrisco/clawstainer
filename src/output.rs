@@ -72,6 +72,7 @@ impl CliError {
 /// 8  = runtime unavailable
 /// 9  = resource limit
 /// 10 = permission denied
+/// 13 = Lima VM operation failed
 fn exit_code_for(error: &str) -> i32 {
     match error {
         "machine_not_found" => 2,
@@ -83,6 +84,7 @@ fn exit_code_for(error: &str) -> i32 {
         "runtime_unavailable" => 8,
         "resource_limit" => 9,
         "permission_denied" => 10,
+        "vm_error" => 13,
         _ => 1,
     }
 }
@@ -108,7 +110,10 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&err.to_json()).unwrap();
 
         assert_eq!(json["error"], "machine_not_found");
-        assert_eq!(json["hint"], "Run 'clawstainer list' to see active machines");
+        assert_eq!(
+            json["hint"],
+            "Run 'clawstainer list' to see active machines"
+        );
     }
 
     #[test]
