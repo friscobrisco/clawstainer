@@ -46,7 +46,8 @@ pub fn run(args: CpArgs, state: &StateStore) -> Result<()> {
     };
 
     // Validate machine exists and is running
-    state.get_running_machine(machine_id)?;
+    let runtime = crate::runtime_for_machine(machine_id, state);
+    state.get_running_machine_live(machine_id, runtime.as_ref())?;
 
     let status = match direction {
         "pull" => Command::new("machinectl")

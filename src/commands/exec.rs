@@ -8,7 +8,7 @@ use crate::runtime::{ExecOpts, Runtime};
 use crate::state::StateStore;
 
 pub fn run(args: ExecArgs, runtime: &dyn Runtime, state: &StateStore) -> Result<()> {
-    state.get_running_machine(&args.machine_id)?;
+    state.get_running_machine_live(&args.machine_id, runtime)?;
 
     let mut env = HashMap::new();
     for e in &args.envs {

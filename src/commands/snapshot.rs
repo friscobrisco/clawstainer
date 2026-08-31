@@ -6,7 +6,8 @@ use crate::output;
 use crate::state::StateStore;
 
 pub fn run_create(args: SnapshotCreateArgs, state: &StateStore) -> Result<()> {
-    state.get_running_machine(&args.machine_id)?;
+    let runtime = crate::runtime_for_machine(&args.machine_id, state);
+    state.get_running_machine_live(&args.machine_id, runtime.as_ref())?;
 
     let info = image::snapshot::create(&args.machine_id, &args.name)?;
     output::print_json(&info);
