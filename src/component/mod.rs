@@ -103,6 +103,20 @@ mod tests {
     }
 
     #[test]
+    fn test_hermes_agent_uses_official_noninteractive_installer() {
+        let file = load_components().unwrap();
+        let hermes = file.components.get("hermes-agent").unwrap();
+
+        assert!(hermes
+            .install
+            .contains("https://hermes-agent.nousresearch.com/install.sh"));
+        assert!(hermes.install.contains("--skip-setup"));
+        assert!(!hermes.install.contains("|| true"));
+        assert_eq!(hermes.verify, "hermes --version");
+        assert_eq!(hermes.timeout, Some(1200));
+    }
+
+    #[test]
     fn test_bundles_exist() {
         let file = load_components().unwrap();
         assert!(file.bundles.contains_key("agent-default"));

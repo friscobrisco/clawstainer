@@ -1,6 +1,6 @@
 # clawstainer — AI Agent Skills Reference
 
-> Version 0.2.0
+> Version 0.2.1
 
 Machine-readable reference for AI agents using clawstainer sandboxes. All commands default to `--format auto`: JSON when piped (typical agent usage), table in interactive terminals. Pass `--format json` explicitly to guarantee JSON output. Errors go to stderr as JSON with a non-zero exit code.
 
@@ -175,6 +175,8 @@ Progress is printed to stderr per component. Pass `--format json` to guarantee J
 **Bundles:** `agent-default` (python3, nodejs, git, curl, jq, ripgrep), `web-dev`, `ml`, `openclaw`
 
 Each component that fails does NOT block others. Results are reported individually.
+
+`hermes-agent` uses the official Nous Research installer with a 1200-second component timeout. Provision it in a sandbox with at least 4096 MB of memory and `--linger`; provisioning skips interactive setup, so run `hermes setup` from `clawstainer shell <MACHINE_ID>` afterward.
 
 ---
 

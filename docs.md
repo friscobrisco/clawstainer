@@ -1,6 +1,6 @@
 # clawstainer Documentation
 
-> Version 0.2.0
+> Version 0.2.1
 
 ## Overview
 
@@ -13,6 +13,12 @@ Two runtime backends are available:
 ---
 
 ## Installation
+
+### From crates.io
+
+```bash
+cargo install clawstainer
+```
 
 ### From source
 
@@ -28,7 +34,7 @@ clawstainer uses [Lima](https://lima-vm.io/) to transparently run a Linux VM on 
 
 ```bash
 brew install lima
-cargo install --path .
+cargo install clawstainer
 clawstainer create --name my-box   # just works
 ```
 
@@ -45,7 +51,7 @@ Runs natively with no VM layer.
 ```bash
 # nspawn runtime (default)
 sudo apt-get install -y systemd-container debootstrap
-cargo install --path .
+cargo install clawstainer
 sudo clawstainer create --name my-box
 ```
 
@@ -348,7 +354,7 @@ nodejs               ok            18.0s
 | `ripgrep` | ripgrep (`rg`) |
 | `jq` | jq |
 | `claude-code` | Claude Code CLI (installed via `claude.ai`). Timeout: 300s |
-| `hermes-agent` | Hermes agent from NousResearch (installed via remote script). Timeout: 600s |
+| `hermes-agent` | Current Hermes Agent from NousResearch (official installer; interactive setup skipped). Timeout: 1200s |
 | `openclaw` | OpenClaw gateway (installed via `openclaw.ai`, runs as systemd service). Timeout: 600s |
 
 #### Available bundles
@@ -371,16 +377,18 @@ Ready-to-use components for spinning up AI agent sandboxes:
 clawstainer create --name claude-box --memory 2048 --cpus 2
 clawstainer provision <id> --components claude-code
 
-# Hermes Agent sandbox
-clawstainer create --name hermes-box --memory 2048 --cpus 2
+# Hermes Agent sandbox (requires 4GB+ RAM)
+clawstainer create --name hermes-box --memory 4096 --cpus 2 --linger
 clawstainer provision <id> --components hermes-agent
+clawstainer shell <id>
+hermes setup
 
 # OpenClaw Gateway sandbox (--linger keeps the gateway alive after logout)
 clawstainer create --name openclaw-box --memory 2048 --cpus 2 --linger
 clawstainer provision <id> --components openclaw
 ```
 
-These components have built-in timeouts so you don't need to pass `--timeout` manually.
+These components have built-in timeouts so you don't need to pass `--timeout` manually. Hermes provisioning installs the current CLI and dependencies but intentionally skips the credential-bearing setup wizard; run `hermes setup` interactively inside the sandbox afterward.
 
 #### Examples
 
