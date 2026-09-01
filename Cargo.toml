@@ -1,6 +1,6 @@
 [package]
 name = "clawstainer"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Lightweight isolated Linux environments for AI agents"
 license = "MIT"
@@ -9,6 +9,7 @@ readme = "README.md"
 authors = ["Renée Rosillo"]
 keywords = ["container", "sandbox", "ai", "agent", "nspawn"]
 categories = ["command-line-utilities", "virtualization"]
+exclude = [".claude/"]
 
 [[bin]]
 name = "clawstainer"

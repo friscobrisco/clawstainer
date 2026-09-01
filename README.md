@@ -1,6 +1,6 @@
-# clawstainer v0.2.0
+# clawstainer v0.2.1
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
@@ -17,8 +17,8 @@ Built in Rust. Two runtime backends:
 ## Quick Start
 
 ```bash
-# Install
-cargo install --path .
+# Install from crates.io
+cargo install clawstainer
 
 # Create a sandbox
 clawstainer create --name dev-box --memory 1024 --cpus 2
@@ -60,7 +60,7 @@ clawstainer uses [Lima](https://lima-vm.io/) to run a lightweight Linux VM trans
 
 ```bash
 brew install lima
-cargo install --path .
+cargo install clawstainer
 clawstainer create --name my-box
 ```
 
@@ -88,7 +88,7 @@ Runs natively with no VM layer. Both runtimes are available.
 ```bash
 # nspawn runtime (default)
 sudo apt-get install -y systemd-container debootstrap
-cargo install --path .
+cargo install clawstainer
 sudo clawstainer create --name my-box
 
 # Firecracker runtime (requires /dev/kvm)
@@ -121,13 +121,16 @@ clawstainer provision <id> --components claude-code
 # Hermes Agent (NousResearch) — requires 4GB+ RAM
 clawstainer create --name hermes-box --memory 4096 --cpus 2 --linger
 clawstainer provision <id> --components hermes-agent
+# Complete the credential-bearing setup interactively after provisioning
+clawstainer shell <id>
+hermes setup
 
 # OpenClaw Gateway
 clawstainer create --name openclaw-box --memory 2048 --cpus 2 --linger
 clawstainer provision <id> --components openclaw
 ```
 
-Each template includes all dependencies and has built-in timeouts. Use `--linger` for agents that run long-lived services (like OpenClaw and Hermes) — without it, systemd may stop user sessions on logout/idle and kill the gateway process.
+Each template includes all dependencies and has built-in timeouts. The Hermes recipe uses the official installer and leaves its interactive setup pending so reusable snapshots do not contain credentials. Use `--linger` for agents that run long-lived services (like OpenClaw and Hermes) — without it, systemd may stop user sessions on logout/idle and kill the gateway process.
 
 ## Fleet Management
 
