@@ -47,11 +47,16 @@ components:
     tags: [tool, json]
 
   hermes-agent:
+    # Requires 4GB+ RAM — pip install OOMs at 2GB
     install: |
       apt-get update
       apt-get install -y curl git xz-utils
       curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
-      printf '#!/bin/bash\ncd /root/.hermes/hermes-agent && . venv/bin/activate && python cli.py "$@"\n' > /usr/local/bin/hermes-agent
+      cat > /usr/local/bin/hermes-agent << 'WRAPPER'
+      #!/bin/bash
+      cd /root/.hermes/hermes-agent && . venv/bin/activate && python cli.py "$@"
+      WRAPPER
+      sed -i 's/^      //' /usr/local/bin/hermes-agent
       chmod +x /usr/local/bin/hermes-agent
       echo 'export PATH="/root/.local/bin:/root/.hermes/node/bin:$PATH"' >> /root/.bashrc
       mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/root

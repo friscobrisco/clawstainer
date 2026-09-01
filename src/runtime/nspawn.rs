@@ -192,15 +192,19 @@ impl Runtime for NspawnRuntime {
 
         eprintln!(" ready ({:.1}s)", create_start.elapsed().as_secs_f64());
 
-        // If timeout > 0, spawn a background thread to auto-destroy
+        // If timeout > 0, spawn a background thread to auto-destroy.
+        // We call the full destroy() path (not just `machinectl poweroff`) so
+        // that state.json, the IP allocation, and the overlay are all cleaned
+        // up — otherwise `claw list` would keep showing the machine as running
+        // and its resources would leak until the user ran destroy manually.
         if opts.timeout > 0 {
             let timeout = opts.timeout;
             let destroy_id = id.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(timeout));
-                let _ = Command::new("machinectl")
-                    .args(["poweroff", &destroy_id])
-                    .output();
+                if let Ok(state) = StateStore::new() {
+                    let _ = NspawnRuntime.destroy(&destroy_id, &state);
+                }
             });
         }
 
