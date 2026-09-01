@@ -215,16 +215,19 @@ impl Runtime for FirecrackerRuntime {
             Ok(())
         })?;
 
-        // Auto-destroy timeout
+        // Auto-destroy timeout.
+        // We call the full destroy() path (not just `pkill`) so that state.json,
+        // the IP allocation, the TAP device, and the rootfs are all cleaned up.
+        // Otherwise `claw list` would keep showing the VM as running and its
+        // resources would leak until the user ran destroy manually.
         if opts.timeout > 0 {
             let timeout = opts.timeout;
             let destroy_id = id.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(timeout));
-                // Kill the firecracker process
-                let _ = Command::new("pkill")
-                    .args(["-f", &format!("firecracker.*{destroy_id}")])
-                    .output();
+                if let Ok(state) = StateStore::new() {
+                    let _ = FirecrackerRuntime.destroy(&destroy_id, &state);
+                }
             });
         }
 
