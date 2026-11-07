@@ -11,6 +11,10 @@ keywords = ["container", "sandbox", "ai", "agent", "nspawn"]
 categories = ["command-line-utilities", "virtualization"]
 exclude = [".claude/"]
 
+[lib]
+name = "clawstainer"
+path = "src/lib.rs"
+
 [[bin]]
 name = "clawstainer"
 path = "src/main.rs"
@@ -35,6 +39,7 @@ fs2 = "0.4"
 rand = "0.8"
 dirs = "6"
 libc = "0.2"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"

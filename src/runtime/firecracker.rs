@@ -1,9 +1,46 @@
 use anyhow::Result;
 use std::process::Command;
-use std::time::Instant;
 
 use crate::error::ClawError;
 use crate::firecracker::{api::FirecrackerApi, assets, rootfs, vsock as fc_vsock};
+use clawstainer::wire;
+
+/// Output kept per stream for a buffered exec; the rest is counted, not stored.
+const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
+
+/// A writer that keeps the first `cap` bytes and counts everything.
+struct CappedBuffer {
+    buf: Vec<u8>,
+    cap: usize,
+    total: u64,
+}
+
+impl CappedBuffer {
+    fn new(cap: usize) -> Self {
+        CappedBuffer { buf: Vec::new(), cap, total: 0 }
+    }
+    fn bytes(&self) -> &[u8] {
+        &self.buf
+    }
+    fn total(&self) -> u64 {
+        self.total
+    }
+    fn truncated(&self) -> bool {
+        self.total > self.buf.len() as u64
+    }
+}
+
+impl std::io::Write for CappedBuffer {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.total += data.len() as u64;
+        let room = self.cap.saturating_sub(self.buf.len());
+        self.buf.extend_from_slice(&data[..room.min(data.len())]);
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 use crate::network;
 use crate::state::{Machine, StateStore};
 
@@ -243,77 +280,51 @@ impl Runtime for FirecrackerRuntime {
     fn exec(&self, machine_id: &str, opts: ExecOpts) -> Result<ExecResult> {
         require_linux()?;
 
-        let start = Instant::now();
         let vsock_path = Self::vsock_path(machine_id);
+        let session = fc_vsock::connect_wire(&vsock_path)
+            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
 
-        // Connect to guest agent via vsock
-        let stream = fc_vsock::connect(&vsock_path)
-            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e}")))?;
+        let req = wire::OpenRequest::Exec {
+            command: opts.command,
+            workdir: Some(opts.workdir),
+            env: opts.env,
+            user: opts.user,
+            timeout_secs: opts.timeout,
+        };
+        let mut stdout = CappedBuffer::new(MAX_EXEC_OUTPUT_BYTES);
+        let mut stderr = CappedBuffer::new(MAX_EXEC_OUTPUT_BYTES);
+        let exit = wire::client::exec(&session, &req, None::<std::io::Empty>, &mut stdout, &mut stderr)
+            .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
 
-        // Send exec request
-        let req = serde_json::json!({
-            "type": "exec",
-            "command": opts.command,
-            "timeout": opts.timeout,
-            "workdir": opts.workdir,
-            "env": opts.env,
-            "user": opts.user,
-        });
-
-        let resp = fc_vsock::request(&stream, &req)
-            .map_err(|e| ClawError::ExecFailed(format!("Agent communication failed: {e}")))?;
-
-        let duration_ms = start.elapsed().as_millis() as u64;
-
-        // Parse response
-        if resp.get("type").and_then(|t| t.as_str()) == Some("error") {
-            let msg = resp.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
-            return Err(ClawError::ExecFailed(msg.to_string()).into());
-        }
-
+        let truncated = stdout.truncated() || stderr.truncated();
         Ok(ExecResult {
             machine_id: machine_id.to_string(),
-            exit_code: resp.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(-1) as i32,
-            stdout: resp.get("stdout").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            stderr: resp.get("stderr").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            duration_ms: resp.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(duration_ms),
-            timed_out: resp.get("timed_out").and_then(|v| v.as_bool()).unwrap_or(false),
-            truncated: false,
-            total_bytes: None,
+            exit_code: exit.exit_code(),
+            stdout: String::from_utf8_lossy(stdout.bytes()).into_owned(),
+            stderr: String::from_utf8_lossy(stderr.bytes()).into_owned(),
+            duration_ms: exit.duration_ms,
+            timed_out: exit.timed_out,
+            truncated,
+            total_bytes: truncated.then(|| stdout.total() + stderr.total()),
             peak_memory_bytes: None,
             cpu_time_us: None,
         })
     }
 
-    fn shell(&self, machine_id: &str, _user: &str) -> Result<()> {
+    fn shell(&self, machine_id: &str, user: &str) -> Result<()> {
         require_linux()?;
 
-        // For interactive shell, fall back to serial console via the API socket.
-        // A full vsock-based PTY proxy would be ideal but is complex.
-        // Instead, use SSH if available, or instruct the user.
-        let sock_path = Self::socket_path(machine_id);
-
-        eprintln!("Attaching to Firecracker serial console...");
-        eprintln!("(Use Ctrl+] to detach)");
-
-        // Use socat to connect to the Firecracker log/console
-        let status = Command::new("socat")
-            .args([
-                "STDIN,raw,echo=0,escape=0x1d",
-                &format!("UNIX-CONNECT:{sock_path}"),
-            ])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .map_err(|e| ClawError::ExecFailed(
-                format!("Failed to attach to console (is socat installed?): {e}")
-            ))?;
-
-        if !status.success() {
-            return Err(ClawError::ExecFailed(
-                "Console session ended".to_string()
-            ).into());
+        let vsock_path = Self::vsock_path(machine_id);
+        let session = fc_vsock::connect_wire(&vsock_path)
+            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
+        let exit = wire::client::interactive_shell(&session, user, None)
+            .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
+        if exit.exit_code() != 0 {
+            return Err(ClawError::ExecFailed(format!(
+                "Shell exited with status {}",
+                exit.exit_code()
+            ))
+            .into());
         }
         Ok(())
     }

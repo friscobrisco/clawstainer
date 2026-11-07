@@ -1,42 +1,46 @@
 //! Host-side vsock client.
 //!
-//! Firecracker exposes guest vsock as a Unix domain socket on the host.
-//! The UDS path is: {vsock_uds_path}_{cid}_{port}
-//! We connect to this to talk to the claw-agent inside the VM.
+//! Firecracker exposes the guest's vsock device as a Unix socket on the host
+//! (`uds_path` in the `/vsock` config). For host-initiated connections the
+//! host connects to that socket and sends `CONNECT <port>\n`; Firecracker
+//! answers `OK <host_port>\n` and from then on the socket is a byte stream to
+//! the guest port. (`{uds_path}_{port}` is only used for connections the
+//! *guest* initiates.)
 
-use anyhow::{Context, Result};
-use std::io::{BufRead, BufReader, Write};
+use anyhow::{bail, Context, Result};
+use std::io::Write;
 use std::os::unix::net::UnixStream;
+use std::time::Duration;
 
-const GUEST_CID: u32 = 3;
+use clawstainer::wire;
+
 const AGENT_PORT: u32 = 52;
 
-/// Connect to the guest agent via the vsock UDS
+/// Connect to the guest agent's port through Firecracker's vsock proxy.
 pub fn connect(vsock_uds_path: &str) -> Result<UnixStream> {
-    // Firecracker creates UDS at: {path}_{cid}_{port}
-    let uds_path = format!("{vsock_uds_path}_{GUEST_CID}_{AGENT_PORT}");
+    let mut stream = UnixStream::connect(vsock_uds_path)
+        .with_context(|| format!("Failed to connect to vsock socket at {vsock_uds_path}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    writeln!(stream, "CONNECT {AGENT_PORT}").context("Failed to send vsock CONNECT")?;
+    stream.flush()?;
 
-    UnixStream::connect(&uds_path)
-        .with_context(|| format!("Failed to connect to guest agent at {uds_path}"))
+    let reply = wire::frame::read_line_unbuffered(&mut stream, 64)
+        .context("Failed to read vsock CONNECT reply")?;
+    if !reply.starts_with(b"OK ") {
+        bail!(
+            "Firecracker refused the vsock connection to port {AGENT_PORT}: {:?}",
+            String::from_utf8_lossy(&reply).trim()
+        );
+    }
+    stream.set_read_timeout(None)?;
+    Ok(stream)
 }
 
-/// Send a JSON request and read a JSON response
-pub fn request(stream: &UnixStream, req: &serde_json::Value) -> Result<serde_json::Value> {
-    let mut writer = stream;
-    let reader = BufReader::new(stream);
-
-    let req_json = serde_json::to_string(req)?;
-    writeln!(writer, "{req_json}")
-        .context("Failed to send request to guest agent")?;
-    writer.flush()?;
-
-    let mut line = String::new();
-    let mut reader = reader;
-    reader.read_line(&mut line)
-        .context("Failed to read response from guest agent")?;
-
-    serde_json::from_str(&line)
-        .context("Failed to parse guest agent response")
+/// Open a streaming (CLAW/2) session with the guest agent.
+pub fn connect_wire(vsock_uds_path: &str) -> Result<wire::Session> {
+    let stream = connect(vsock_uds_path)?;
+    wire::Session::client(stream, wire::Config::default())
+        .context("Guest agent did not accept the streaming protocol")
 }
 
 /// Wait for the guest agent to become reachable
@@ -44,19 +48,15 @@ pub fn wait_for_agent(vsock_uds_path: &str, timeout_ms: u64) -> Result<()> {
     let start = std::time::Instant::now();
 
     loop {
-        if let Ok(stream) = connect(vsock_uds_path) {
-            // Try a health check
-            let health_req = serde_json::json!({"type": "health"});
-            if let Ok(resp) = request(&stream, &health_req) {
-                if resp.get("type").and_then(|t| t.as_str()) == Some("health_result") {
-                    return Ok(());
-                }
+        if let Ok(session) = connect_wire(vsock_uds_path) {
+            if wire::client::health(&session).is_ok() {
+                return Ok(());
             }
         }
 
         if start.elapsed().as_millis() as u64 > timeout_ms {
-            anyhow::bail!("Timed out waiting for guest agent");
+            bail!("Timed out waiting for guest agent");
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
