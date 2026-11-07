@@ -1,29 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::process::Command;
 
-const BRIDGE_NAME: &str = "claw-br0";
-
-/// Create a TAP device and attach it to the bridge
-pub fn create_tap(name: &str) -> Result<()> {
-    Command::new("ip")
-        .args(["tuntap", "add", name, "mode", "tap"])
-        .output()
-        .context("Failed to create TAP device")?;
-
-    Command::new("ip")
-        .args(["link", "set", name, "master", BRIDGE_NAME])
-        .output()
-        .context("Failed to attach TAP to bridge")?;
-
-    Command::new("ip")
-        .args(["link", "set", name, "up"])
-        .output()
-        .context("Failed to bring up TAP device")?;
-
-    Ok(())
-}
-
-/// Delete a TAP device
+/// Delete a TAP device. Used to clean up Firecracker machines created before
+/// per-VM networking (`clawstainer::vmnet`), which used bridged TAPs.
 pub fn delete_tap(name: &str) -> Result<()> {
     let _ = Command::new("ip")
         .args(["link", "delete", name])

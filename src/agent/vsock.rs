@@ -81,6 +81,25 @@ pub struct VsockStream {
     fd: RawFd,
 }
 
+impl VsockStream {
+    /// Duplicate the descriptor so reads and writes can happen on
+    /// different threads.
+    pub fn try_clone(&self) -> io::Result<VsockStream> {
+        let fd = unsafe { libc::dup(self.fd) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(VsockStream { fd })
+    }
+
+    /// Shut down both directions, unblocking any thread reading this socket.
+    pub fn shutdown(&self) {
+        unsafe {
+            libc::shutdown(self.fd, libc::SHUT_RDWR);
+        }
+    }
+}
+
 impl AsRawFd for VsockStream {
     fn as_raw_fd(&self) -> RawFd {
         self.fd

@@ -1,9 +1,72 @@
 use anyhow::Result;
 use std::process::Command;
-use std::time::Instant;
 
 use crate::error::ClawError;
 use crate::firecracker::{api::FirecrackerApi, assets, rootfs, vsock as fc_vsock};
+use clawstainer::vmnet::{self, VmNet};
+use clawstainer::wire;
+
+/// Tears down a VM's network on drop unless disarmed, so a failed create
+/// doesn't leak a TAP, a firewall chain, or an address slot.
+struct NetGuard<'a> {
+    state: &'a StateStore,
+    vm: Option<VmNet>,
+}
+
+impl NetGuard<'_> {
+    fn disarm(&mut self) {
+        self.vm = None;
+    }
+}
+
+impl Drop for NetGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(vm) = self.vm.take() {
+            vmnet::teardown(&vm);
+            let _ = self.state.with_lock(|s| {
+                s.network.vm_slots.remove(&vm.slot);
+                Ok(())
+            });
+        }
+    }
+}
+
+/// Output kept per stream for a buffered exec; the rest is counted, not stored.
+const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
+
+/// A writer that keeps the first `cap` bytes and counts everything.
+struct CappedBuffer {
+    buf: Vec<u8>,
+    cap: usize,
+    total: u64,
+}
+
+impl CappedBuffer {
+    fn new(cap: usize) -> Self {
+        CappedBuffer { buf: Vec::new(), cap, total: 0 }
+    }
+    fn bytes(&self) -> &[u8] {
+        &self.buf
+    }
+    fn total(&self) -> u64 {
+        self.total
+    }
+    fn truncated(&self) -> bool {
+        self.total > self.buf.len() as u64
+    }
+}
+
+impl std::io::Write for CappedBuffer {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.total += data.len() as u64;
+        let room = self.cap.saturating_sub(self.buf.len());
+        self.buf.extend_from_slice(&data[..room.min(data.len())]);
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 use crate::network;
 use crate::state::{Machine, StateStore};
 
@@ -68,24 +131,21 @@ impl Runtime for FirecrackerRuntime {
         let vm_rootfs = rootfs::create_vm_rootfs(&id)
             .map_err(|e| ClawError::CreateFailed(format!("Rootfs creation failed: {e}")))?;
 
-        // Network setup
-        let ip = if opts.network == "nat" {
-            network::bridge::ensure_bridge()?;
-            network::nat::ensure_nat()?;
-            let allocated_ip = state.with_lock(|s| {
-                let ip = network::ipam::allocate(&mut s.network, &id)?;
-                Ok(ip)
+        // Network setup: a routed TAP with its own /30 and firewall chain.
+        // The guard tears it down again if any later step fails.
+        let mut net_guard = NetGuard { state, vm: None };
+        if opts.network == "nat" {
+            let slot = state.with_lock(|s| {
+                let slot = vmnet::allocate_slot(&s.network.vm_slots)?;
+                s.network.vm_slots.insert(slot, id.clone());
+                Ok(slot)
             })?;
-
-            // Create TAP device and attach to bridge
-            let tap = network::tap::tap_name(&id);
-            network::tap::create_tap(&tap)
-                .map_err(|e| ClawError::CreateFailed(format!("TAP setup failed: {e}")))?;
-
-            Some(allocated_ip)
-        } else {
-            None
-        };
+            let vm = VmNet::new(slot, &id)?;
+            net_guard.vm = Some(vm.clone());
+            vmnet::setup(&vm)
+                .map_err(|e| ClawError::CreateFailed(format!("Network setup failed: {e:#}")))?;
+        }
+        let ip = net_guard.vm.as_ref().map(|vm| vm.guest_ip.to_string());
 
         // Prepare socket path
         let sock_path = Self::socket_path(&id);
@@ -110,18 +170,10 @@ impl Runtime for FirecrackerRuntime {
             .map_err(|e| ClawError::CreateFailed(format!("Firecracker API not ready: {e}")))?;
 
         // Configure the VM via API
-        let tap_name = network::tap::tap_name(&id);
-        let guest_mac = format!("AA:FC:00:00:00:{:02x}", ip.as_ref().map(|i| {
-            i.split('.').last().unwrap_or("2").parse::<u8>().unwrap_or(2)
-        }).unwrap_or(2));
-
-        // Boot args with static IP configuration
-        let boot_args = if let Some(ref ip) = ip {
-            format!(
-                "console=ttyS0 reboot=k panic=1 pci=off ip={ip}::10.0.0.1:255.255.255.0::eth0:off"
-            )
-        } else {
-            "console=ttyS0 reboot=k panic=1 pci=off".to_string()
+        let base_args = "console=ttyS0 reboot=k panic=1 pci=off";
+        let boot_args = match &net_guard.vm {
+            Some(vm) => format!("{base_args} {}", vm.kernel_ip_arg()),
+            None => base_args.to_string(),
         };
 
         // PUT /boot-source
@@ -145,11 +197,11 @@ impl Runtime for FirecrackerRuntime {
         }
 
         // PUT /network-interfaces/eth0 (only if NAT networking)
-        if opts.network == "nat" {
+        if let Some(vm) = &net_guard.vm {
             let resp = api.put("/network-interfaces/eth0", &serde_json::json!({
                 "iface_id": "eth0",
-                "guest_mac": guest_mac,
-                "host_dev_name": tap_name,
+                "guest_mac": vm.mac,
+                "host_dev_name": vm.tap,
             }))?;
             if !resp.is_success() {
                 return Err(ClawError::CreateFailed(format!("Failed to set network: {}", resp.body)).into());
@@ -214,6 +266,7 @@ impl Runtime for FirecrackerRuntime {
             s.machines.insert(id.clone(), machine);
             Ok(())
         })?;
+        net_guard.disarm();
 
         // Auto-destroy timeout.
         // We call the full destroy() path (not just `pkill`) so that state.json,
@@ -243,77 +296,51 @@ impl Runtime for FirecrackerRuntime {
     fn exec(&self, machine_id: &str, opts: ExecOpts) -> Result<ExecResult> {
         require_linux()?;
 
-        let start = Instant::now();
         let vsock_path = Self::vsock_path(machine_id);
+        let session = fc_vsock::connect_wire(&vsock_path)
+            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
 
-        // Connect to guest agent via vsock
-        let stream = fc_vsock::connect(&vsock_path)
-            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e}")))?;
+        let req = wire::OpenRequest::Exec {
+            command: opts.command,
+            workdir: Some(opts.workdir),
+            env: opts.env,
+            user: opts.user,
+            timeout_secs: opts.timeout,
+        };
+        let mut stdout = CappedBuffer::new(MAX_EXEC_OUTPUT_BYTES);
+        let mut stderr = CappedBuffer::new(MAX_EXEC_OUTPUT_BYTES);
+        let exit = wire::client::exec(&session, &req, None::<std::io::Empty>, &mut stdout, &mut stderr)
+            .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
 
-        // Send exec request
-        let req = serde_json::json!({
-            "type": "exec",
-            "command": opts.command,
-            "timeout": opts.timeout,
-            "workdir": opts.workdir,
-            "env": opts.env,
-            "user": opts.user,
-        });
-
-        let resp = fc_vsock::request(&stream, &req)
-            .map_err(|e| ClawError::ExecFailed(format!("Agent communication failed: {e}")))?;
-
-        let duration_ms = start.elapsed().as_millis() as u64;
-
-        // Parse response
-        if resp.get("type").and_then(|t| t.as_str()) == Some("error") {
-            let msg = resp.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
-            return Err(ClawError::ExecFailed(msg.to_string()).into());
-        }
-
+        let truncated = stdout.truncated() || stderr.truncated();
         Ok(ExecResult {
             machine_id: machine_id.to_string(),
-            exit_code: resp.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(-1) as i32,
-            stdout: resp.get("stdout").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            stderr: resp.get("stderr").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            duration_ms: resp.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(duration_ms),
-            timed_out: resp.get("timed_out").and_then(|v| v.as_bool()).unwrap_or(false),
-            truncated: false,
-            total_bytes: None,
+            exit_code: exit.exit_code(),
+            stdout: String::from_utf8_lossy(stdout.bytes()).into_owned(),
+            stderr: String::from_utf8_lossy(stderr.bytes()).into_owned(),
+            duration_ms: exit.duration_ms,
+            timed_out: exit.timed_out,
+            truncated,
+            total_bytes: truncated.then(|| stdout.total() + stderr.total()),
             peak_memory_bytes: None,
             cpu_time_us: None,
         })
     }
 
-    fn shell(&self, machine_id: &str, _user: &str) -> Result<()> {
+    fn shell(&self, machine_id: &str, user: &str) -> Result<()> {
         require_linux()?;
 
-        // For interactive shell, fall back to serial console via the API socket.
-        // A full vsock-based PTY proxy would be ideal but is complex.
-        // Instead, use SSH if available, or instruct the user.
-        let sock_path = Self::socket_path(machine_id);
-
-        eprintln!("Attaching to Firecracker serial console...");
-        eprintln!("(Use Ctrl+] to detach)");
-
-        // Use socat to connect to the Firecracker log/console
-        let status = Command::new("socat")
-            .args([
-                "STDIN,raw,echo=0,escape=0x1d",
-                &format!("UNIX-CONNECT:{sock_path}"),
-            ])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .map_err(|e| ClawError::ExecFailed(
-                format!("Failed to attach to console (is socat installed?): {e}")
-            ))?;
-
-        if !status.success() {
-            return Err(ClawError::ExecFailed(
-                "Console session ended".to_string()
-            ).into());
+        let vsock_path = Self::vsock_path(machine_id);
+        let session = fc_vsock::connect_wire(&vsock_path)
+            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
+        let exit = wire::client::interactive_shell(&session, user, None)
+            .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
+        if exit.exit_code() != 0 {
+            return Err(ClawError::ExecFailed(format!(
+                "Shell exited with status {}",
+                exit.exit_code()
+            ))
+            .into());
         }
         Ok(())
     }
@@ -362,9 +389,17 @@ impl Runtime for FirecrackerRuntime {
             }
         }
 
-        // Clean up TAP device
-        let tap = network::tap::tap_name(machine_id);
-        let _ = network::tap::delete_tap(&tap);
+        // Clean up the VM's network: its TAP, firewall chain, and slot.
+        let slot = state.with_read_lock(|s| {
+            Ok(s.network.vm_slots.iter().find(|(_, m)| m.as_str() == machine_id).map(|(k, _)| *k))
+        })?;
+        match slot.map(|slot| VmNet::new(slot, machine_id)) {
+            Some(Ok(vm)) => vmnet::teardown(&vm),
+            // Machines created before per-VM networking used a bridged TAP.
+            _ => {
+                let _ = network::tap::delete_tap(&network::tap::tap_name(machine_id));
+            }
+        }
 
         // Clean up rootfs and socket
         let _ = rootfs::cleanup_vm_rootfs(machine_id);
@@ -375,6 +410,10 @@ impl Runtime for FirecrackerRuntime {
                 if let Some(ref ip) = m.ip {
                     network::ipam::release(&mut s.network, ip);
                 }
+            }
+            s.network.vm_slots.retain(|_, m| m.as_str() != machine_id);
+            if s.network.vm_slots.is_empty() {
+                let _ = vmnet::remove_table();
             }
             if s.machines.is_empty() {
                 let _ = network::bridge::remove_bridge();
