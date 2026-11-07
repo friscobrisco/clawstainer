@@ -5,3 +5,5 @@
 //! need live here. Everything else stays private to `src/main.rs`.
 
 pub mod wire;
+
+pub mod vmnet;
