@@ -158,6 +158,17 @@ pub fn ensure_base_ext4() -> Result<PathBuf> {
             wants_dir.join("claw-agent.service"),
         );
 
+        // The container image ships a netplan config that runs DHCP on eth0.
+        // Firecracker VMs get a static address on the kernel command line
+        // (`ip=`), which systemd-network-generator turns into a networkd
+        // config; netplan's DHCP config would override it and leave eth0
+        // without an address.
+        if let Ok(entries) = std::fs::read_dir(mnt.join("etc/netplan")) {
+            for entry in entries.flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+
         // Write resolv.conf
         let resolv = mnt.join("etc/resolv.conf");
         if resolv.is_symlink() {

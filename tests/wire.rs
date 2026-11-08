@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 
 use clawstainer::wire::client;
 use clawstainer::wire::frame::{self, Frame, Kind, WINDOW};
-use clawstainer::wire::server::{self, ServerConfig};
+use clawstainer::wire::server::{self, GuestOps, ServerConfig};
+use std::sync::{Arc, Mutex};
 use clawstainer::wire::{stream, Config, Control, Event, OpenRequest, Session};
 use sha2::{Digest, Sha256};
 
@@ -250,7 +251,7 @@ fn upload_and_download_roundtrip() {
 
 #[test]
 fn upload_over_the_limit_is_rejected_without_writing() {
-    let s = pair_with(ServerConfig { max_transfer_bytes: 1024 }, Config::default());
+    let s = pair_with(ServerConfig { max_transfer_bytes: 1024, ..ServerConfig::default() }, Config::default());
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("big");
     fs::write(&src, vec![7u8; 4096]).unwrap();
@@ -413,4 +414,86 @@ fn server_refuses_garbage_open_but_keeps_session() {
             break;
         }
     }
+}
+
+/// Records guest operations instead of performing them.
+#[derive(Default)]
+struct RecordingOps {
+    log: Mutex<Vec<String>>,
+    fail_freeze: bool,
+}
+
+impl RecordingOps {
+    fn log(&self) -> Vec<String> {
+        self.log.lock().unwrap().clone()
+    }
+}
+
+impl GuestOps for RecordingOps {
+    fn freeze(&self) -> io::Result<()> {
+        if self.fail_freeze {
+            return Err(io::Error::other("device busy"));
+        }
+        self.log.lock().unwrap().push("freeze".into());
+        Ok(())
+    }
+    fn thaw(&self) -> io::Result<()> {
+        self.log.lock().unwrap().push("thaw".into());
+        Ok(())
+    }
+    fn set_clock(&self, unix_nanos: u64) -> io::Result<()> {
+        self.log.lock().unwrap().push(format!("clock {unix_nanos}"));
+        Ok(())
+    }
+}
+
+fn config_with(ops: Arc<RecordingOps>) -> ServerConfig {
+    ServerConfig { ops, ..ServerConfig::default() }
+}
+
+#[test]
+fn freeze_survives_reconnect_and_thaws_once() {
+    let ops = Arc::new(RecordingOps::default());
+    let cfg = config_with(ops.clone());
+
+    // Freeze on one connection, which then goes away (the VM is paused).
+    let s1 = pair_with(cfg.clone(), Config::default());
+    client::guest_control(&s1, &OpenRequest::Freeze { auto_thaw_secs: 30 }).unwrap();
+    // A second freeze while frozen doesn't freeze twice.
+    client::guest_control(&s1, &OpenRequest::Freeze { auto_thaw_secs: 30 }).unwrap();
+    drop(s1);
+
+    // After resume: a new connection sets the clock and thaws.
+    let s2 = pair_with(cfg, Config::default());
+    client::guest_control(&s2, &OpenRequest::SetClock { unix_nanos: 1_700_000_000_123_456_789 }).unwrap();
+    client::guest_control(&s2, &OpenRequest::Thaw).unwrap();
+    assert_eq!(ops.log(), vec!["freeze", "clock 1700000000123456789", "thaw"]);
+}
+
+#[test]
+fn freeze_auto_thaws_when_the_host_never_comes_back() {
+    let ops = Arc::new(RecordingOps::default());
+    let s = pair_with(config_with(ops.clone()), Config::default());
+    client::guest_control(&s, &OpenRequest::Freeze { auto_thaw_secs: 1 }).unwrap();
+    assert!(wait_until(Duration::from_secs(3), || ops.log() == vec!["freeze", "thaw"]), "{:?}", ops.log());
+}
+
+#[test]
+fn stale_auto_thaw_does_not_undo_a_newer_freeze() {
+    let ops = Arc::new(RecordingOps::default());
+    let s = pair_with(config_with(ops.clone()), Config::default());
+    client::guest_control(&s, &OpenRequest::Freeze { auto_thaw_secs: 1 }).unwrap();
+    client::guest_control(&s, &OpenRequest::Thaw).unwrap();
+    client::guest_control(&s, &OpenRequest::Freeze { auto_thaw_secs: 30 }).unwrap();
+    std::thread::sleep(Duration::from_millis(1500));
+    // The first freeze's 1 s timer fired but must not thaw the second.
+    assert_eq!(ops.log(), vec!["freeze", "thaw", "freeze"]);
+}
+
+#[test]
+fn freeze_failure_is_reported() {
+    let ops = Arc::new(RecordingOps { fail_freeze: true, ..RecordingOps::default() });
+    let s = pair_with(config_with(ops), Config::default());
+    let err = client::guest_control(&s, &OpenRequest::Freeze { auto_thaw_secs: 30 }).unwrap_err();
+    assert!(err.to_string().contains("device busy"), "{err}");
 }

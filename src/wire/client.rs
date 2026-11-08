@@ -52,6 +52,26 @@ pub fn health(session: &Session) -> Result<String> {
     bail!("agent closed the health channel without answering")
 }
 
+/// Send a guest-control request (freeze, thaw, set clock) and wait for
+/// [`Control::Done`].
+pub fn guest_control(session: &Session, req: &OpenRequest) -> Result<()> {
+    if !matches!(req, OpenRequest::Freeze { .. } | OpenRequest::Thaw | OpenRequest::SetClock { .. }) {
+        bail!("guest_control needs a Freeze, Thaw, or SetClock request");
+    }
+    let ch = session.open(req)?;
+    while let Some(ev) = ch.recv() {
+        match ev {
+            Event::Control(Control::Done) => {
+                ch.close();
+                return Ok(());
+            }
+            Event::Control(Control::Error { message }) => bail!(message),
+            _ => {}
+        }
+    }
+    bail!("agent closed the channel without answering")
+}
+
 /// Pump `input` into the channel's STDIN, then send EOF. Runs on its own
 /// thread; stops quietly if the channel closes first.
 fn spawn_input<R: Read + Send + 'static>(ch: Channel, mut input: R) {

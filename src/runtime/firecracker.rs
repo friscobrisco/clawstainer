@@ -6,6 +6,42 @@ use crate::firecracker::{api::FirecrackerApi, assets, rootfs, vsock as fc_vsock}
 use clawstainer::vmnet::{self, VmNet};
 use clawstainer::wire;
 
+/// Kills the VM process and removes its directory on drop unless disarmed,
+/// so a failed create doesn't leave a running Firecracker behind.
+struct VmGuard {
+    id: String,
+    pid: Option<u32>,
+}
+
+impl VmGuard {
+    fn disarm(&mut self) {
+        self.id.clear();
+    }
+}
+
+impl Drop for VmGuard {
+    fn drop(&mut self) {
+        if self.id.is_empty() {
+            return;
+        }
+        if let Some(pid) = self.pid {
+            // SAFETY: plain kill(2); the pid is our own child.
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+                libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
+            }
+        }
+        // Keep the log of a failed create for debugging.
+        let failed_dir = "/var/lib/clawstainer/failed";
+        let _ = std::fs::create_dir_all(failed_dir);
+        let _ = std::fs::copy(
+            format!("{MACHINES_DIR}/{}/firecracker.log", self.id),
+            format!("{failed_dir}/{}.log", self.id),
+        );
+        let _ = rootfs::cleanup_vm_rootfs(&self.id);
+    }
+}
+
 /// Tears down a VM's network on drop unless disarmed, so a failed create
 /// doesn't leak a TAP, a firewall chain, or an address slot.
 struct NetGuard<'a> {
@@ -30,6 +66,10 @@ impl Drop for NetGuard<'_> {
         }
     }
 }
+
+/// How long a cold boot may take before the guest agent must answer. A full
+/// Ubuntu userspace takes several seconds, longer under nested virtualization.
+const AGENT_BOOT_TIMEOUT_MS: u64 = 60_000;
 
 /// Output kept per stream for a buffered exec; the rest is counted, not stored.
 const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
@@ -107,6 +147,27 @@ impl FirecrackerRuntime {
         format!("{adj}-{animal}")
     }
 
+    fn pid_path(machine_id: &str) -> String {
+        format!("{MACHINES_DIR}/{machine_id}/firecracker.pid")
+    }
+
+    /// The live Firecracker pid for this machine, if it is running. Checks
+    /// the process's command line so a recycled pid is never mistaken for
+    /// the VM.
+    fn live_pid(machine_id: &str, hint: Option<u32>) -> Option<u32> {
+        let from_file = std::fs::read_to_string(Self::pid_path(machine_id))
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok());
+        [hint, from_file].into_iter().flatten().find(|&pid| {
+            std::fs::read(format!("/proc/{pid}/cmdline"))
+                .map(|cmd| {
+                    let cmd = String::from_utf8_lossy(&cmd);
+                    cmd.contains("firecracker") && cmd.contains(machine_id)
+                })
+                .unwrap_or(false)
+        })
+    }
+
     fn socket_path(machine_id: &str) -> String {
         format!("{MACHINES_DIR}/{machine_id}/firecracker.sock")
     }
@@ -126,6 +187,9 @@ impl Runtime for FirecrackerRuntime {
         // Ensure Firecracker binary and kernel are available
         let (fc_bin, kernel_path) = assets::ensure_assets()
             .map_err(|e| ClawError::CreateFailed(format!("Asset setup failed: {e}")))?;
+
+        // Everything created from here on is removed again if create fails.
+        let mut vm_guard = VmGuard { id: id.clone(), pid: None };
 
         // Create per-VM rootfs
         let vm_rootfs = rootfs::create_vm_rootfs(&id)
@@ -154,14 +218,21 @@ impl Runtime for FirecrackerRuntime {
         let _ = std::fs::remove_file(&sock_path);
 
         // Start Firecracker process
+        // Firecracker's own log (and the guest serial console) go here.
+        let log_path = format!("{MACHINES_DIR}/{id}/firecracker.log");
+        let log = std::fs::File::create(&log_path)
+            .map_err(|e| ClawError::CreateFailed(format!("Cannot create {log_path}: {e}")))?;
         let child = Command::new(fc_bin.to_str().unwrap())
             .args(["--api-sock", &sock_path])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log)
             .spawn()
             .map_err(|e| ClawError::CreateFailed(format!("Failed to start Firecracker: {e}")))?;
 
         let pid = child.id();
+        vm_guard.pid = Some(pid);
+        std::fs::write(Self::pid_path(&id), pid.to_string())
+            .map_err(|e| ClawError::CreateFailed(format!("Cannot write pid file: {e}")))?;
         let now = chrono::Utc::now();
 
         // Wait for API to be ready
@@ -238,7 +309,7 @@ impl Runtime for FirecrackerRuntime {
 
         // Wait for guest agent to become reachable
         eprintln!("Waiting for guest agent...");
-        fc_vsock::wait_for_agent(&vsock_path, 10000)
+        fc_vsock::wait_for_agent(&vsock_path, AGENT_BOOT_TIMEOUT_MS)
             .map_err(|e| ClawError::CreateFailed(format!("Guest agent not reachable: {e}")))?;
 
         // Save to state
@@ -267,6 +338,7 @@ impl Runtime for FirecrackerRuntime {
             Ok(())
         })?;
         net_guard.disarm();
+        vm_guard.disarm();
 
         // Auto-destroy timeout.
         // We call the full destroy() path (not just `pkill`) so that state.json,
@@ -359,33 +431,40 @@ impl Runtime for FirecrackerRuntime {
             .signed_duration_since(machine.created_at)
             .num_seconds() as u64;
 
-        // Send shutdown via API
-        let sock_path = Self::socket_path(machine_id);
-        if std::path::Path::new(&sock_path).exists() {
-            let api = FirecrackerApi::new(&sock_path);
-            let _ = api.put("/actions", &serde_json::json!({
-                "action_type": "SendCtrlAltDel",
-            }));
-
-            // Wait up to 3 seconds for graceful shutdown
-            if let Some(pid) = machine.pid {
-                for _ in 0..30 {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    // Check if process still exists
-                    let alive = Command::new("kill")
-                        .args(["-0", &pid.to_string()])
-                        .output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false);
-                    if !alive {
+        // Ask the guest to shut down (x86 only; aarch64 has no Ctrl-Alt-Del),
+        // give it a moment, then make sure the VMM is gone.
+        if let Some(pid) = Self::live_pid(machine_id, machine.pid) {
+            let sock_path = Self::socket_path(machine_id);
+            if std::path::Path::new(&sock_path).exists() {
+                let api = FirecrackerApi::new(&sock_path);
+                let _ = api.put("/actions", &serde_json::json!({
+                    "action_type": "SendCtrlAltDel",
+                }));
+            }
+            let alive = || unsafe { libc::kill(pid as i32, 0) } == 0;
+            for _ in 0..30 {
+                if !alive() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            if alive() {
+                // SAFETY: plain kill(2) on the VM's own pid (verified above).
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGKILL);
+                }
+                for _ in 0..50 {
+                    if !alive() {
                         break;
                     }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
                 }
-
-                // Force kill if still running
-                let _ = Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .output();
+            }
+            if alive() {
+                return Err(ClawError::ExecFailed(format!(
+                    "Firecracker process {pid} for {machine_id} did not exit"
+                ))
+                .into());
             }
         }
 
@@ -432,17 +511,13 @@ impl Runtime for FirecrackerRuntime {
     fn status(&self, machine_id: &str) -> Result<MachineStatus> {
         require_linux()?;
 
-        let sock_path = Self::socket_path(machine_id);
-        let status = if std::path::Path::new(&sock_path).exists() {
-            "running".to_string()
-        } else {
-            "stopped".to_string()
-        };
+        let pid = Self::live_pid(machine_id, None);
+        let status = if pid.is_some() { "running" } else { "stopped" }.to_string();
 
         Ok(MachineStatus {
             id: machine_id.to_string(),
             status,
-            pid: None,
+            pid,
         })
     }
 }

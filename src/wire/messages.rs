@@ -86,6 +86,27 @@ pub enum OpenRequest {
     /// Connect to `127.0.0.1:port` inside the guest and relay bytes:
     /// client -> guest on `STDIN`, guest -> client on `STDOUT`.
     PortForward { port: u16 },
+
+    /// Flush and freeze the guest's root filesystem before a snapshot.
+    /// Replies [`Control::Done`]. The agent thaws by itself after
+    /// `auto_thaw_secs` if no [`OpenRequest::Thaw`] arrives, so a host that
+    /// dies mid-pause can't leave the guest frozen.
+    Freeze {
+        #[serde(default = "default_auto_thaw")]
+        auto_thaw_secs: u64,
+    },
+
+    /// Thaw a frozen filesystem. Replies [`Control::Done`] (also when it
+    /// was not frozen).
+    Thaw,
+
+    /// Set the guest's wall clock (after a resume). Replies
+    /// [`Control::Done`].
+    SetClock { unix_nanos: u64 },
+}
+
+fn default_auto_thaw() -> u64 {
+    30
 }
 
 /// In-channel control messages, in either direction.
@@ -105,6 +126,8 @@ pub enum Control {
     FileMeta { size: u64, mode: u32 },
     Checksum { sha256: String },
     UploadDone { size: u64, sha256: String },
+    /// A guest-control request (freeze, thaw, set clock) succeeded.
+    Done,
     Error { message: String },
 }
 

@@ -62,18 +62,45 @@ impl FirecrackerApi {
     fn send_request(&self, request: &str) -> Result<ApiResponse> {
         let mut stream = UnixStream::connect(&self.socket_path)
             .context("Failed to connect to Firecracker API socket")?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
 
         stream.write_all(request.as_bytes())
             .context("Failed to send request")?;
 
-        stream.shutdown(std::net::Shutdown::Write)
-            .context("Failed to shutdown write")?;
+        // Firecracker keeps connections alive and resets half-closed ones,
+        // so read exactly one response: headers, then Content-Length bytes.
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        let header_end = loop {
+            if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos + 4;
+            }
+            if raw.len() > 64 * 1024 {
+                anyhow::bail!("Firecracker API response headers too large");
+            }
+            let n = stream.read(&mut buf).context("Failed to read response")?;
+            if n == 0 {
+                anyhow::bail!("Firecracker API closed the connection without a response");
+            }
+            raw.extend_from_slice(&buf[..n]);
+        };
+        let headers = String::from_utf8_lossy(&raw[..header_end]).to_string();
+        let content_length = headers
+            .lines()
+            .find_map(|l| {
+                let (k, v) = l.split_once(':')?;
+                k.trim().eq_ignore_ascii_case("content-length").then(|| v.trim().parse::<usize>().ok())?
+            })
+            .unwrap_or(0);
+        while raw.len() < header_end + content_length {
+            let n = stream.read(&mut buf).context("Failed to read response body")?;
+            if n == 0 {
+                anyhow::bail!("Firecracker API response body was cut short");
+            }
+            raw.extend_from_slice(&buf[..n]);
+        }
 
-        let mut response = String::new();
-        stream.read_to_string(&mut response)
-            .context("Failed to read response")?;
-
-        parse_response(&response)
+        parse_response(&String::from_utf8_lossy(&raw[..header_end + content_length]))
     }
 }
 
