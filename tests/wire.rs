@@ -645,9 +645,8 @@ fn newer_attach_supersedes_older_and_unknown_sessions_are_refused() {
     });
     // The original channel is told it lost the session.
     let reason = loop {
-        match ch.recv().expect("closed without a reason") {
-            Event::Control(Control::Error { message }) => break message,
-            _ => {}
+        if let Event::Control(Control::Error { message }) = ch.recv().expect("closed without a reason") {
+            break message;
         }
     };
     assert!(reason.contains("another connection"), "{reason}");
