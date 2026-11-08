@@ -70,6 +70,27 @@ pub trait Runtime {
     fn shell(&self, machine_id: &str, user: &str) -> Result<()>;
     fn destroy(&self, machine_id: &str, state: &StateStore) -> Result<DestroyResult>;
     fn status(&self, machine_id: &str) -> Result<MachineStatus>;
+
+    /// Snapshot a running sandbox to encrypted storage and free its CPU and
+    /// memory. Only runtimes with VM snapshots support this.
+    fn pause(&self, machine_id: &str, _state: &StateStore) -> Result<PauseResult> {
+        anyhow::bail!("pause is not supported for sandbox {machine_id}'s runtime (Firecracker only)")
+    }
+
+    /// Restore a paused sandbox with its processes intact.
+    fn resume(&self, machine_id: &str, _state: &StateStore) -> Result<PauseResult> {
+        anyhow::bail!("resume is not supported for sandbox {machine_id}'s runtime (Firecracker only)")
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PauseResult {
+    pub machine_id: String,
+    pub status: String,
+    pub duration_ms: u64,
+    /// Encrypted snapshot size on disk (pause only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_bytes: Option<u64>,
 }
 
 pub struct CreateOpts {

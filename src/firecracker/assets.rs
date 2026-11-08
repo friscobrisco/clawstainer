@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 const FC_DIR: &str = "/var/lib/clawstainer/firecracker";
-const FC_VERSION: &str = "v1.11.0";
+pub const FC_VERSION: &str = "v1.11.0";
 
 fn fc_url(arch: &str) -> String {
     format!(

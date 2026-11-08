@@ -3,8 +3,134 @@ use std::process::Command;
 
 use crate::error::ClawError;
 use crate::firecracker::{api::FirecrackerApi, assets, rootfs, vsock as fc_vsock};
+use clawstainer::snapcrypt::{self, LocalKeyStore, SnapshotMeta};
 use clawstainer::vmnet::{self, VmNet};
+use anyhow::{anyhow, bail, Context};
+use std::os::unix::fs::DirBuilderExt;
+use std::path::PathBuf;
+use std::time::Instant;
 use clawstainer::wire;
+
+const KEYS_DIR: &str = "/var/lib/clawstainer/keys";
+
+fn machine_dir(machine_id: &str) -> PathBuf {
+    PathBuf::from(MACHINES_DIR).join(machine_id)
+}
+
+/// Turn a non-2xx Firecracker API response into an error.
+fn api_ok(resp: Result<crate::firecracker::api::ApiResponse>, what: &str) -> Result<()> {
+    let resp = resp.with_context(|| format!("Firecracker API call failed: {what}"))?;
+    if !resp.is_success() {
+        bail!("Firecracker refused to {what} ({}): {}", resp.status, resp.body.trim());
+    }
+    Ok(())
+}
+
+/// SIGKILL a VMM and wait (up to 2 s) for it to disappear.
+fn kill_and_wait(pid: u32) -> Result<()> {
+    let alive = || unsafe { libc::kill(pid as i32, 0) } == 0;
+    // SAFETY: plain kill(2) on a pid we verified belongs to the VM.
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+    for _ in 0..100 {
+        if !alive() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    bail!("Firecracker process {pid} did not exit")
+}
+
+/// Start a bare Firecracker for `machine_id` (API socket + log in the
+/// machine dir) and record its pid.
+fn spawn_firecracker(fc_bin: &std::path::Path, machine_id: &str) -> Result<u32> {
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(machine_dir(machine_id).join("firecracker.log"))?;
+    let child = Command::new(fc_bin)
+        .args(["--api-sock", &FirecrackerRuntime::socket_path(machine_id)])
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .spawn()
+        .context("Failed to start Firecracker")?;
+    let pid = child.id();
+    std::fs::write(FirecrackerRuntime::pid_path(machine_id), pid.to_string())?;
+    Ok(pid)
+}
+
+/// What a snapshot must match to be restorable on this host.
+struct SnapshotBinding {
+    sandbox_id: String,
+    kernel_sha256: String,
+    cpu_model: String,
+}
+
+impl SnapshotBinding {
+    fn current(sandbox_id: &str, kernel: &std::path::Path) -> Result<SnapshotBinding> {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        std::io::copy(&mut std::fs::File::open(kernel)?, &mut hasher)?;
+        Ok(SnapshotBinding {
+            sandbox_id: sandbox_id.to_string(),
+            kernel_sha256: wire::messages::hex(&hasher.finalize()),
+            cpu_model: cpu_model(),
+        })
+    }
+
+    fn for_kind(&self, kind: &str) -> SnapshotMeta {
+        SnapshotMeta {
+            sandbox_id: self.sandbox_id.clone(),
+            kind: kind.to_string(),
+            firecracker_version: assets::FC_VERSION.to_string(),
+            kernel_sha256: self.kernel_sha256.clone(),
+            cpu_model: self.cpu_model.clone(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    fn check(&self, found: &SnapshotMeta, kind: &str) -> Result<()> {
+        let mismatch = |what: &str, want: &str, got: &str| {
+            Err(anyhow!("{kind} snapshot was taken with {what} {got:?}, this host has {want:?}"))
+        };
+        if found.sandbox_id != self.sandbox_id {
+            return mismatch("sandbox", &self.sandbox_id, &found.sandbox_id);
+        }
+        if found.kind != kind {
+            return mismatch("kind", kind, &found.kind);
+        }
+        if found.firecracker_version != assets::FC_VERSION {
+            return mismatch("Firecracker", assets::FC_VERSION, &found.firecracker_version);
+        }
+        if found.kernel_sha256 != self.kernel_sha256 {
+            return mismatch("kernel", &self.kernel_sha256, &found.kernel_sha256);
+        }
+        if found.cpu_model != self.cpu_model {
+            return mismatch("CPU", &self.cpu_model, &found.cpu_model);
+        }
+        Ok(())
+    }
+}
+
+/// A stable description of the host CPU model from /proc/cpuinfo.
+fn cpu_model() -> String {
+    let info = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let field = |key: &str| {
+        info.lines()
+            .find(|l| l.split(':').next().map(str::trim) == Some(key))
+            .and_then(|l| l.split_once(':'))
+            .map(|(_, v)| v.trim().to_string())
+    };
+    if let Some(name) = field("model name") {
+        return name;
+    }
+    // aarch64 exposes the implementer and part number instead of a name.
+    match (field("CPU implementer"), field("CPU part")) {
+        (Some(i), Some(p)) => format!("arm implementer {i} part {p}"),
+        _ => "unknown".to_string(),
+    }
+}
 
 /// Kills the VM process and removes its directory on drop unless disarmed,
 /// so a failed create doesn't leave a running Firecracker behind.
@@ -112,7 +238,7 @@ use crate::state::{Machine, StateStore};
 
 use super::{
     require_linux, CreateOpts, DestroyResult, ExecOpts, ExecResult, MachineInfo, MachineStatus,
-    Runtime,
+    PauseResult, Runtime,
 };
 
 const MACHINES_DIR: &str = "/var/lib/clawstainer/machines";
@@ -505,6 +631,170 @@ impl Runtime for FirecrackerRuntime {
             machine_id: machine_id.to_string(),
             status: "destroyed".to_string(),
             uptime_seconds: uptime,
+        })
+    }
+
+    fn pause(&self, machine_id: &str, state: &StateStore) -> Result<PauseResult> {
+        require_linux()?;
+        let started = Instant::now();
+        let machine = state.get_machine(machine_id)?;
+        if machine.status != "running" {
+            bail!("{machine_id} is {}, not running", machine.status);
+        }
+        let pid = Self::live_pid(machine_id, machine.pid)
+            .ok_or_else(|| anyhow!("{machine_id} has no running Firecracker process"))?;
+        let (_, kernel_path) = assets::ensure_assets()?;
+        let meta = SnapshotBinding::current(machine_id, &kernel_path)?;
+
+        let dir = machine_dir(machine_id);
+        let work = dir.join("snapshot.work");
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::DirBuilder::new().mode(0o700).create(&work)?;
+        let (mem_enc, state_enc) = (dir.join("memory.snap"), dir.join("vmstate.snap"));
+        let api = FirecrackerApi::new(&Self::socket_path(machine_id))
+            .with_timeout(std::time::Duration::from_secs(600));
+        let vsock = Self::vsock_path(machine_id);
+
+        // 1. Flush and freeze the guest filesystem so the disk is consistent
+        //    with the memory image. The agent thaws by itself if we vanish.
+        {
+            let session = fc_vsock::connect_wire(&vsock)?;
+            wire::client::guest_control(&session, &wire::OpenRequest::Freeze { auto_thaw_secs: 300 })
+                .context("Could not freeze the guest filesystem")?;
+        }
+
+        let result = (|| -> Result<u64> {
+            // 2. Stop the vCPUs, 3. write the snapshot, 4. encrypt it.
+            api_ok(api.patch("/vm", &serde_json::json!({ "state": "Paused" })), "pause vCPUs")?;
+            let (mem_plain, state_plain) = (work.join("memory"), work.join("vmstate"));
+            api_ok(
+                api.put("/snapshot/create", &serde_json::json!({
+                    "snapshot_type": "Full",
+                    "snapshot_path": state_plain,
+                    "mem_file_path": mem_plain,
+                })),
+                "create snapshot",
+            )?;
+            let keys = LocalKeyStore::new(KEYS_DIR);
+            let key_id = LocalKeyStore::DEFAULT_KEY_ID;
+            snapcrypt::encrypt_file(&mem_plain, &mem_enc, &keys, key_id, &meta.for_kind("memory"), snapcrypt::DEFAULT_CHUNK)?;
+            snapcrypt::encrypt_file(&state_plain, &state_enc, &keys, key_id, &meta.for_kind("vmstate"), snapcrypt::DEFAULT_CHUNK)?;
+            Ok(std::fs::metadata(&mem_enc)?.len() + std::fs::metadata(&state_enc)?.len())
+        })();
+        // Plaintext memory never outlives this call.
+        let _ = std::fs::remove_dir_all(&work);
+
+        let snapshot_bytes = match result {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                // Roll back: keep the VM running exactly as before.
+                let _ = std::fs::remove_file(&mem_enc);
+                let _ = std::fs::remove_file(&state_enc);
+                let _ = api.patch("/vm", &serde_json::json!({ "state": "Resumed" }));
+                if let Ok(session) = fc_vsock::connect_wire(&vsock) {
+                    let _ = wire::client::guest_control(&session, &wire::OpenRequest::Thaw);
+                }
+                return Err(e.context(format!("Pause of {machine_id} failed; it is still running")));
+            }
+        };
+
+        // 5. The snapshot is safe on disk: stop the VMM and free its memory.
+        kill_and_wait(pid)?;
+        for f in [Self::socket_path(machine_id), vsock, Self::pid_path(machine_id)] {
+            let _ = std::fs::remove_file(f);
+        }
+        state.update_machine_status(machine_id, "paused", None)?;
+
+        Ok(PauseResult {
+            machine_id: machine_id.to_string(),
+            status: "paused".to_string(),
+            duration_ms: started.elapsed().as_millis() as u64,
+            snapshot_bytes: Some(snapshot_bytes),
+        })
+    }
+
+    fn resume(&self, machine_id: &str, state: &StateStore) -> Result<PauseResult> {
+        require_linux()?;
+        let started = Instant::now();
+        let machine = state.get_machine(machine_id)?;
+        if machine.status != "paused" {
+            bail!("{machine_id} is {}, not paused", machine.status);
+        }
+        let dir = machine_dir(machine_id);
+        let (mem_enc, state_enc) = (dir.join("memory.snap"), dir.join("vmstate.snap"));
+        if !mem_enc.exists() || !state_enc.exists() {
+            bail!("{machine_id} is marked paused but its snapshot files are missing");
+        }
+
+        // A memory snapshot only restores on the same CPU model, kernel,
+        // and Firecracker version it was taken with.
+        let (fc_bin, kernel_path) = assets::ensure_assets()?;
+        let expected = SnapshotBinding::current(machine_id, &kernel_path)?;
+        for (path, kind) in [(&mem_enc, "memory"), (&state_enc, "vmstate")] {
+            let (_, found) = snapcrypt::read_meta(path)?;
+            expected.check(&found, kind)?;
+        }
+
+        let work = dir.join("snapshot.work");
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::DirBuilder::new().mode(0o700).create(&work)?;
+        let (mem_plain, state_plain) = (work.join("memory"), work.join("vmstate"));
+        let keys = LocalKeyStore::new(KEYS_DIR);
+
+        let sock_path = Self::socket_path(machine_id);
+        let vsock = Self::vsock_path(machine_id);
+        let result = (|| -> Result<u32> {
+            snapcrypt::decrypt_file(&mem_enc, &mem_plain, &keys)?;
+            snapcrypt::decrypt_file(&state_enc, &state_plain, &keys)?;
+
+            // Firecracker re-binds both sockets from the snapshot.
+            let _ = std::fs::remove_file(&sock_path);
+            let _ = std::fs::remove_file(&vsock);
+            let pid = spawn_firecracker(&fc_bin, machine_id)?;
+            let restore = (|| -> Result<()> {
+                let api = FirecrackerApi::new(&sock_path).with_timeout(std::time::Duration::from_secs(600));
+                api.wait_for_ready(5000)?;
+                api_ok(
+                    api.put("/snapshot/load", &serde_json::json!({
+                        "snapshot_path": state_plain,
+                        "mem_backend": { "backend_type": "File", "backend_path": mem_plain },
+                        "enable_diff_snapshots": false,
+                        "resume_vm": true,
+                    })),
+                    "load snapshot",
+                )?;
+                fc_vsock::wait_for_agent(&vsock, 15_000)?;
+                let session = fc_vsock::connect_wire(&vsock)?;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_nanos() as u64;
+                wire::client::guest_control(&session, &wire::OpenRequest::SetClock { unix_nanos: now })?;
+                wire::client::guest_control(&session, &wire::OpenRequest::Thaw)?;
+                Ok(())
+            })();
+            if let Err(e) = restore {
+                let _ = kill_and_wait(pid);
+                let _ = std::fs::remove_file(Self::pid_path(machine_id));
+                return Err(e);
+            }
+            Ok(pid)
+        })();
+        // The memory file is mapped privately by Firecracker, so the
+        // plaintext can be unlinked as soon as the load has happened.
+        let _ = std::fs::remove_dir_all(&work);
+
+        let pid = result.map_err(|e| {
+            e.context(format!("Resume of {machine_id} failed; it is still paused and its snapshot is kept"))
+        })?;
+        let _ = std::fs::remove_file(&mem_enc);
+        let _ = std::fs::remove_file(&state_enc);
+        state.update_machine_status(machine_id, "running", Some(pid))?;
+
+        Ok(PauseResult {
+            machine_id: machine_id.to_string(),
+            status: "running".to_string(),
+            duration_ms: started.elapsed().as_millis() as u64,
+            snapshot_bytes: None,
         })
     }
 

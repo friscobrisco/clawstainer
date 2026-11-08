@@ -80,6 +80,35 @@ for ((i = 1; i <= LOOPS; i++)); do
   check "status keeps the pid" python3 -c "
 import json, sys; m = json.load(open('$STATE'))['machines']['$id']; sys.exit(0 if m['pid'] else 1)"
 
+  # Pause/resume: a background process must survive with its memory.
+  vm "$id" 'nohup bash -c "while :; do echo \$((++n)) > /dev/shm/count; sleep 0.1; done" >/dev/null 2>&1 & echo $! > /dev/shm/pid' >/dev/null
+  sleep 1
+  before_pid=$(vm "$id" 'cat /dev/shm/pid')
+  check "pause" bash -c "'$BIN' pause $id >/dev/null"
+  check "no VMM while paused" bash -c "! pgrep -a -x firecracker | grep -q $id"
+  check "snapshot is encrypted at rest" bash -c "head -c 8 /var/lib/clawstainer/machines/$id/memory.snap | grep -q CLAWSNP1"
+  check "no plaintext snapshot left" test ! -e "/var/lib/clawstainer/machines/$id/snapshot.work"
+  check "exec refused while paused" bash -c "! '$BIN' exec $id true >/dev/null 2>&1"
+
+  # A corrupted snapshot must fail to resume and leave the VM paused.
+  snap="/var/lib/clawstainer/machines/$id/memory.snap"
+  cp "$snap" "$snap.bak"
+  printf '\xff' | dd of="$snap" bs=1 seek=4096 conv=notrunc status=none
+  check "corrupt snapshot refused" bash -c "! '$BIN' resume $id >/dev/null 2>&1"
+  check "still paused after failed resume" python3 -c "
+import json, sys; sys.exit(0 if json.load(open('$STATE'))['machines']['$id']['status'] == 'paused' else 1)"
+  check "no VMM after failed resume" bash -c "! pgrep -a -x firecracker | grep -q $id"
+  mv "$snap.bak" "$snap"
+
+  check "resume" bash -c "'$BIN' resume $id >/dev/null"
+  check "process survived pause" test "$(vm "$id" 'kill -0 $(cat /dev/shm/pid) && cat /dev/shm/pid')" = "$before_pid"
+  c1=$(vm "$id" 'cat /dev/shm/count'); sleep 0.5; c2=$(vm "$id" 'cat /dev/shm/count')
+  check "process keeps running after resume" test "$c2" -gt "$c1"
+  guest_t=$(vm "$id" 'date +%s'); host_t=$(date +%s)
+  check "guest clock resynced" test $(( guest_t > host_t ? guest_t - host_t : host_t - guest_t )) -le 2
+  check "network after resume" test "$(vm "$id" 'timeout 5 bash -c "</dev/tcp/1.1.1.1/443" && echo ok')" = "ok"
+  check "snapshot removed after resume" test ! -e "$snap"
+
   check "destroy" bash -c "'$BIN' destroy $id >/dev/null"
   leak_check
 done

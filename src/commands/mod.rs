@@ -5,6 +5,7 @@ pub mod exec;
 pub mod fleet;
 pub mod list;
 pub mod logs;
+pub mod pause;
 pub mod port_forward;
 pub mod provision;
 pub mod shell;

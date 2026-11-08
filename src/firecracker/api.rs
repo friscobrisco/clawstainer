@@ -7,13 +7,22 @@ use std::path::Path;
 /// Firecracker's API is simple: PUT/GET with JSON bodies over a UDS.
 pub struct FirecrackerApi {
     socket_path: String,
+    timeout: std::time::Duration,
 }
 
 impl FirecrackerApi {
     pub fn new(socket_path: &str) -> Self {
         Self {
             socket_path: socket_path.to_string(),
+            timeout: std::time::Duration::from_secs(30),
         }
+    }
+
+    /// How long to wait for a response. Snapshot create/load of a large VM
+    /// can take much longer than ordinary configuration calls.
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// Wait for the socket to become available
@@ -62,7 +71,7 @@ impl FirecrackerApi {
     fn send_request(&self, request: &str) -> Result<ApiResponse> {
         let mut stream = UnixStream::connect(&self.socket_path)
             .context("Failed to connect to Firecracker API socket")?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+        stream.set_read_timeout(Some(self.timeout))?;
 
         stream.write_all(request.as_bytes())
             .context("Failed to send request")?;
