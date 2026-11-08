@@ -33,11 +33,16 @@ fn main() {
 
     eprintln!("claw-agent: listening for connections");
 
+    // One config for the whole agent: freeze state must be shared, because
+    // the thaw after a resume arrives on a new connection.
+    let config = ServerConfig::default();
+
     loop {
         match listener.accept() {
             Ok(stream) => {
+                let config = config.clone();
                 std::thread::spawn(move || {
-                    if let Err(e) = handle_connection(stream) {
+                    if let Err(e) = handle_connection(stream, config) {
                         eprintln!("claw-agent: connection error: {e}");
                     }
                 });
@@ -49,13 +54,16 @@ fn main() {
     }
 }
 
-fn handle_connection(stream: vsock::VsockStream) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_connection(
+    stream: vsock::VsockStream,
+    config: ServerConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     let first = frame::read_line_unbuffered(&mut &stream, MAX_FIRST_LINE)?;
     if first.is_empty() {
         return Ok(());
     }
     if first == frame::PREAMBLE {
-        return serve_streaming(stream);
+        return serve_streaming(stream, config);
     }
 
     // Legacy protocol: the first line is already a request.
@@ -73,7 +81,10 @@ fn handle_connection(stream: vsock::VsockStream) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-fn serve_streaming(stream: vsock::VsockStream) -> Result<(), Box<dyn std::error::Error>> {
+fn serve_streaming(
+    stream: vsock::VsockStream,
+    config: ServerConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     let reader = stream.try_clone()?;
     let killer = stream.try_clone()?;
     let parts = Parts {
@@ -82,7 +93,7 @@ fn serve_streaming(stream: vsock::VsockStream) -> Result<(), Box<dyn std::error:
         shutdown: Box::new(move || killer.shutdown()),
     };
     let (session, incoming) = wire::Session::server_after_preamble(parts, wire::Config::default())?;
-    wire::server::serve(session, incoming, ServerConfig::default());
+    wire::server::serve(session, incoming, config);
     Ok(())
 }
 

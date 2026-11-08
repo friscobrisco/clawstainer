@@ -12,7 +12,7 @@ Lightweight, isolated Linux environments for AI agents. Spin up a sandbox in sec
 
 Built in Rust. Two runtime backends:
 - **systemd-nspawn** — container-based, works everywhere including macOS via Lima
-- **Firecracker** — microVM-based, hardware-level isolation, requires bare metal or KVM-capable Linux *(untested — included as an experimental option only)*
+- **Firecracker** — microVM-based, hardware-level isolation, requires bare metal or KVM-capable Linux. Each VMM is jailed, each VM gets its own firewalled network, and sandboxes can be paused to encrypted snapshots and resumed *(experimental — see [Firecracker runtime](#firecracker-runtime-experimental))*
 
 ## Quick Start
 
@@ -66,7 +66,7 @@ clawstainer create --name my-box
 
 On first run, Lima provisions an Ubuntu 24.04 VM with `systemd-nspawn` and builds the Linux binary automatically. This takes ~2 minutes. Subsequent runs are instant.
 
-> **Note**: Only the nspawn runtime works on macOS. Firecracker requires hardware virtualization (KVM), which isn't available inside Lima VMs on Apple Silicon due to the lack of nested virtualization.
+> **Note**: The default Lima VM runs the nspawn runtime. Firecracker needs KVM, which Lima only exposes with nested virtualization (Apple M3 or later, macOS 15 or later). That setup is used for testing; see [Firecracker runtime](#firecracker-runtime-experimental).
 
 Manage the local Lima VM through clawstainer itself:
 
@@ -91,20 +91,40 @@ sudo apt-get install -y systemd-container debootstrap
 cargo install clawstainer
 sudo clawstainer create --name my-box
 
-# Firecracker runtime (requires /dev/kvm)
+# Firecracker runtime (requires /dev/kvm and nftables)
 sudo clawstainer create --name fast-box --runtime firecracker
 ```
 
-> **⚠ Firecracker is untested.** It is included as an experimental runtime option but has not been validated in production. Use nspawn (the default) for reliable operation.
+### Firecracker runtime (experimental)
+
+Firecracker sandboxes are full microVMs:
+
+- **Jailed VMM:** each VM's Firecracker runs under the jailer in its own chroot, as its own unprivileged uid with no capabilities, with seccomp filters and a cgroup limiting memory, CPU and processes.
+- **Isolated network:** each VM gets its own routed TAP and `/30`. nftables pins its MAC and IP, blocks VM-to-VM traffic, host services, private and metadata addresses, and outbound SMTP, and allows normal internet access.
+- **Streaming agent:** `exec` and `shell` talk to an in-guest agent over vsock. Output streams live, `shell` gets a real PTY, and an `exec` survives a dropped connection by reattaching.
+- **Pause and resume:** `pause` freezes the guest filesystem, snapshots memory, encrypts it (AES-256-GCM, bound to the CPU model, kernel and Firecracker version), and stops the VM. `resume` restores it with its processes intact, even after a host reboot.
+
+```bash
+sudo clawstainer create --runtime firecracker --memory 1024 --cpus 2
+sudo clawstainer exec <id> "uname -a"
+sudo clawstainer pause <id>     # frees the VM's CPU and memory
+sudo clawstainer resume <id>    # processes continue where they were
+```
+
+> **Status:** validated end to end on aarch64 under nested virtualization (create, exec, shell, isolation, pause/resume, and fault tests for guest OOM, disk full, VMM crash, interrupted pause/resume, and host reboot). Not yet validated on x86 production hardware. The guest is a full Ubuntu userspace, so a cold boot takes about 12 s before the agent answers. Use nspawn (the default) for everyday local work.
+
+`scripts/fc-smoke.sh` (lifecycle and leak checks, `--loop N` for soak runs), `scripts/fc-interrupt.sh` (kills the CLI mid-pause and mid-resume), and `scripts/fc-capacity.sh` (density and timings) exercise the runtime on a KVM host.
 
 ### Runtime Comparison
 
 | | nspawn (default) | Firecracker |
 |---|---|---|
-| Isolation | Container (shared kernel) | VM (separate kernel) |
-| Boot time | ~2-3s | ~125ms |
+| Isolation | Container (shared kernel) | VM (separate kernel), jailed VMM |
+| Boot time | ~2-3s | ~125 ms VMM start; ~12 s until the Ubuntu guest's agent answers |
 | Security | Namespace/cgroup isolation | Hardware-enforced |
-| macOS via Lima | Yes | No (no nested KVM) |
+| Network | Shared bridge | Per-VM routed TAP + nftables isolation |
+| Pause / resume | No | Yes, to encrypted snapshots |
+| macOS via Lima | Yes | Only with nested virtualization (M3+, macOS 15+) |
 | Linux bare metal | Yes | Yes |
 | Linux cloud VM | Yes | Needs nested virt or metal |
 | `/dev/kvm` required | No | Yes |

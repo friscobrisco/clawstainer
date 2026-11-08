@@ -26,6 +26,13 @@ pub enum Commands {
     /// Tear down a sandbox and clean up all resources
     Destroy(DestroyArgs),
 
+    /// Snapshot a running sandbox to encrypted storage and free its CPU and
+    /// memory (Firecracker only)
+    Pause(MachineArgs),
+
+    /// Restore a paused sandbox with its processes intact (Firecracker only)
+    Resume(MachineArgs),
+
     /// List all sandboxes (use --watch N for live refresh)
     List(ListArgs),
 
@@ -325,6 +332,12 @@ pub struct ShellArgs {
     /// Shell user
     #[arg(long, default_value = "root")]
     pub user: String,
+}
+
+#[derive(clap::Args)]
+pub struct MachineArgs {
+    /// Machine ID
+    pub machine_id: String,
 }
 
 #[derive(clap::Args)]

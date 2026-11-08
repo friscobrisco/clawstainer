@@ -7,3 +7,4 @@
 pub mod wire;
 
 pub mod vmnet;
+pub mod snapcrypt;

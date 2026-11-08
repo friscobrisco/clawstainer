@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 use super::messages::{hex, stream, Control, OpenRequest};
 use super::mux::{Channel, Event, Session};
-use super::pty;
+use super::{detach, pty};
 
 /// How long to keep draining output after the main process exits. Output
 /// from background processes that still hold the pipe is cut off after this.
@@ -27,15 +27,152 @@ const READ_CHUNK: usize = 32 * 1024;
 
 const SYSTEM_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
-#[derive(Debug, Clone)]
+/// Privileged operations on the guest OS, behind a trait so tests can
+/// observe them without freezing the machine running the tests.
+pub trait GuestOps: Send + Sync {
+    fn freeze(&self) -> io::Result<()>;
+    fn thaw(&self) -> io::Result<()>;
+    fn set_clock(&self, unix_nanos: u64) -> io::Result<()>;
+}
+
+/// The real operations: FIFREEZE/FITHAW on `/` and `clock_settime`.
+pub struct SystemOps;
+
+#[cfg(target_os = "linux")]
+mod sys {
+    // _IOWR('X', 119, int) and _IOWR('X', 120, int) from <linux/fs.h>.
+    pub const FIFREEZE: libc::c_ulong = 0xC004_5877;
+    pub const FITHAW: libc::c_ulong = 0xC004_5878;
+}
+
+#[cfg(target_os = "linux")]
+fn root_ioctl(request: libc::c_ulong) -> io::Result<()> {
+    let root = File::open("/")?;
+    // SAFETY: FIFREEZE/FITHAW take an int argument that the kernel ignores.
+    let r = unsafe { libc::ioctl(root.as_raw_fd(), request as _, 0) };
+    if r < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+impl GuestOps for SystemOps {
+    #[cfg(target_os = "linux")]
+    fn freeze(&self) -> io::Result<()> {
+        root_ioctl(sys::FIFREEZE)
+    }
+    #[cfg(target_os = "linux")]
+    fn thaw(&self) -> io::Result<()> {
+        match root_ioctl(sys::FITHAW) {
+            // EINVAL: not frozen. Thawing is idempotent.
+            Err(e) if e.raw_os_error() == Some(libc::EINVAL) => Ok(()),
+            other => other,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    fn freeze(&self) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "freeze needs Linux"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    fn thaw(&self) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "thaw needs Linux"))
+    }
+    fn set_clock(&self, unix_nanos: u64) -> io::Result<()> {
+        let ts = libc::timespec {
+            tv_sec: (unix_nanos / 1_000_000_000) as libc::time_t,
+            tv_nsec: (unix_nanos % 1_000_000_000) as _,
+        };
+        // SAFETY: clock_settime reads the timespec.
+        if unsafe { libc::clock_settime(libc::CLOCK_REALTIME, &ts) } < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Freeze bookkeeping shared by every connection to this agent: the thaw
+/// usually arrives on a new connection after the VM is resumed.
+#[derive(Default)]
+pub struct FreezeState {
+    /// Generation of the current freeze, if frozen.
+    frozen: std::sync::Mutex<Option<u64>>,
+    next_gen: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Clone)]
 pub struct ServerConfig {
     /// Largest file accepted by an upload or served by a download.
     pub max_transfer_bytes: u64,
+    pub ops: Arc<dyn GuestOps>,
+    pub freeze: Arc<FreezeState>,
+    /// Detachable execs, shared by every connection to this agent.
+    pub sessions: Arc<detach::Registry>,
+    /// Output buffered per stream for a detachable exec.
+    pub detach_buffer_bytes: usize,
+    /// Grace period for a detachable exec that doesn't set `keep_secs`.
+    pub default_keep: Duration,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        ServerConfig { max_transfer_bytes: 2 * 1024 * 1024 * 1024 }
+        ServerConfig {
+            max_transfer_bytes: 2 * 1024 * 1024 * 1024,
+            ops: Arc::new(SystemOps),
+            freeze: Arc::new(FreezeState::default()),
+            sessions: Arc::new(detach::Registry::default()),
+            detach_buffer_bytes: 1024 * 1024,
+            default_keep: Duration::from_secs(300),
+        }
+    }
+}
+
+impl std::fmt::Debug for ServerConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerConfig")
+            .field("max_transfer_bytes", &self.max_transfer_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+fn freeze(config: &ServerConfig, auto_thaw_secs: u64) -> Result<(), String> {
+    let mut frozen = config.freeze.frozen.lock().unwrap();
+    if frozen.is_none() {
+        config.ops.freeze().map_err(|e| format!("freeze failed: {e}"))?;
+    }
+    // (Re)arm the safety thaw for this generation.
+    let gen = config.freeze.next_gen.fetch_add(1, Ordering::SeqCst);
+    *frozen = Some(gen);
+    drop(frozen);
+
+    let config = config.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(auto_thaw_secs));
+        let mut frozen = config.freeze.frozen.lock().unwrap();
+        if *frozen == Some(gen) {
+            eprintln!("claw-agent: no thaw within {auto_thaw_secs}s, thawing on my own");
+            let _ = config.ops.thaw();
+            *frozen = None;
+        }
+    });
+    Ok(())
+}
+
+fn thaw(config: &ServerConfig) -> Result<(), String> {
+    let mut frozen = config.freeze.frozen.lock().unwrap();
+    config.ops.thaw().map_err(|e| format!("thaw failed: {e}"))?;
+    *frozen = None;
+    Ok(())
+}
+
+fn reply_done(ch: Channel, result: Result<(), String>) {
+    match result {
+        Ok(()) => {
+            let _ = ch.send_control(&Control::Done);
+            ch.close();
+        }
+        Err(e) => ch.close_with_error(e),
     }
 }
 
@@ -61,9 +198,18 @@ pub fn handle(ch: Channel, req: OpenRequest, config: &ServerConfig) {
             });
             ch.close();
         }
-        OpenRequest::Exec { command, workdir, env, user, timeout_secs } => {
+        OpenRequest::Exec { command, workdir, env, user, timeout_secs, session_id, keep_secs } => {
             let cmd = build_command(&command, &user, workdir.as_deref(), &env, None);
-            exec(ch, cmd, timeout_secs);
+            match session_id {
+                None => exec(ch, cmd, timeout_secs),
+                Some(id) => {
+                    let keep = if keep_secs == 0 { config.default_keep } else { Duration::from_secs(keep_secs) };
+                    detach::start(&config.sessions, ch, id, cmd, timeout_secs, keep, config.detach_buffer_bytes);
+                }
+            }
+        }
+        OpenRequest::Attach { session_id, stdout_offset, stderr_offset } => {
+            detach::attach(&config.sessions, ch, &session_id, stdout_offset, stderr_offset);
         }
         OpenRequest::Shell { user, command, cols, rows, term, workdir, env } => {
             let term = term.unwrap_or_else(|| "xterm-256color".into());
@@ -86,6 +232,12 @@ pub fn handle(ch: Channel, req: OpenRequest, config: &ServerConfig) {
             }
         }
         OpenRequest::PortForward { port } => port_forward(ch, port),
+        OpenRequest::Freeze { auto_thaw_secs } => reply_done(ch, freeze(config, auto_thaw_secs)),
+        OpenRequest::Thaw => reply_done(ch, thaw(config)),
+        OpenRequest::SetClock { unix_nanos } => reply_done(
+            ch,
+            config.ops.set_clock(unix_nanos).map_err(|e| format!("set clock failed: {e}")),
+        ),
     }
 }
 
@@ -134,6 +286,23 @@ fn login_shell(user: &str, workdir: Option<&str>, env: &HashMap<String, String>,
     cmd
 }
 
+/// The agent runs with `oom_score_adj = -1000` so the guest OOM killer
+/// never picks it. Children inherit that, so reset it to 0 for everything
+/// the agent starts: user commands must stay killable.
+fn reset_oom_score(cmd: &mut Command) {
+    // SAFETY: open/write/close are async-signal-safe; nothing allocates.
+    unsafe {
+        cmd.pre_exec(|| {
+            let fd = libc::open(c"/proc/self/oom_score_adj".as_ptr(), libc::O_WRONLY);
+            if fd >= 0 {
+                libc::write(fd, b"0".as_ptr().cast(), 1);
+                libc::close(fd);
+            }
+            Ok(())
+        });
+    }
+}
+
 fn apply_env(
     cmd: &mut Command,
     user: &str,
@@ -141,6 +310,7 @@ fn apply_env(
     env: &HashMap<String, String>,
     term: Option<&str>,
 ) {
+    reset_oom_score(cmd);
     let home = home_for(user);
     match workdir {
         Some(dir) => {

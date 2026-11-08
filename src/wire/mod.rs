@@ -15,11 +15,13 @@
 //!   hears nothing for three intervals closes itself.
 //! - **Integrity:** uploads and downloads carry a SHA-256 checksum, are size
 //!   checked, and land on disk with an atomic rename.
-//!
-//! Session reattach after a dropped connection is not implemented yet: if the
-//! transport dies, running execs are killed and the client sees an error.
+//! - **Reattach:** an exec started with a `session_id` survives a dropped
+//!   connection; its output is buffered in the guest and a new connection can
+//!   attach from the byte offsets it already has (see [`detach`]). Execs
+//!   without one, and shells, are killed when their channel closes.
 
 pub mod client;
+pub mod detach;
 pub mod frame;
 pub mod messages;
 pub mod mux;

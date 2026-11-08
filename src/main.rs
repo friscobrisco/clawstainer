@@ -77,6 +77,14 @@ fn main() {
                 commands::destroy::run(args, &rt, &state)
             }
         }
+        Commands::Pause(args) => {
+            let rt = runtime_for_machine(&args.machine_id, &state);
+            commands::pause::pause(args, rt.as_ref(), &state)
+        }
+        Commands::Resume(args) => {
+            let rt = runtime_for_machine(&args.machine_id, &state);
+            commands::pause::resume(args, rt.as_ref(), &state)
+        }
         Commands::Cp(args) => commands::cp::run(args, &state),
         Commands::List(args) => commands::list::run(args, &state),
         Commands::Logs(args) => commands::logs::run(args),
