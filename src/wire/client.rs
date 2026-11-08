@@ -93,23 +93,66 @@ fn spawn_input<R: Read + Send + 'static>(ch: Channel, mut input: R) {
     });
 }
 
+/// The connection to the agent dropped before the command finished. For a
+/// detachable exec, [`attach`] on a new connection picks up where it left
+/// off.
+#[derive(Debug)]
+pub struct ConnectionLost;
+
+impl std::fmt::Display for ConnectionLost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("connection to the guest agent was lost before the command finished")
+    }
+}
+
+impl std::error::Error for ConnectionLost {}
+
+/// How much of a detachable exec's output has been received, so a reattach
+/// resumes at the right place.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Progress {
+    pub stdout: u64,
+    pub stderr: u64,
+    /// Output dropped in the guest while nobody was attached.
+    pub lost: u64,
+}
+
 /// Read events until `Exit`, routing STDOUT/STDERR to the writers.
 fn collect_until_exit(
     ch: &Channel,
     stdout: &mut dyn Write,
+    stderr: Option<&mut dyn Write>,
+) -> Result<ExitInfo> {
+    collect_tracked(ch, stdout, stderr, &mut Progress::default())
+}
+
+fn collect_tracked(
+    ch: &Channel,
+    stdout: &mut dyn Write,
     mut stderr: Option<&mut dyn Write>,
+    progress: &mut Progress,
 ) -> Result<ExitInfo> {
     while let Some(ev) = ch.recv() {
         match ev {
             Event::Data { stream: stream::STDOUT, bytes } => {
                 stdout.write_all(&bytes)?;
                 stdout.flush()?;
+                progress.stdout += bytes.len() as u64;
             }
             Event::Data { stream: stream::STDERR, bytes } => {
                 if let Some(w) = stderr.as_mut() {
                     w.write_all(&bytes)?;
                     w.flush()?;
                 }
+                progress.stderr += bytes.len() as u64;
+            }
+            Event::Control(Control::OutputLost { stream: tag, bytes }) => {
+                if tag == stream::STDERR {
+                    progress.stderr += bytes;
+                } else {
+                    progress.stdout += bytes;
+                }
+                progress.lost += bytes;
             }
             Event::Control(Control::Exit { code, signal, timed_out, duration_ms }) => {
                 ch.close();
@@ -122,7 +165,42 @@ fn collect_until_exit(
             _ => {}
         }
     }
-    bail!("connection to the guest agent was lost before the command finished")
+    Err(ConnectionLost.into())
+}
+
+/// Start a detachable exec (an `Exec` with a `session_id`) with stdin
+/// closed. If the connection drops, the error is [`ConnectionLost`] and
+/// `progress` says where [`attach`] should resume.
+pub fn exec_detachable(
+    session: &Session,
+    req: &OpenRequest,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    progress: &mut Progress,
+) -> Result<ExitInfo> {
+    if !matches!(req, OpenRequest::Exec { session_id: Some(_), .. }) {
+        bail!("exec_detachable needs an Exec request with a session_id");
+    }
+    let ch = session.open(req)?;
+    ch.send_eof(stream::STDIN)?;
+    collect_tracked(&ch, stdout, Some(stderr), progress)
+}
+
+/// Reattach to a detachable exec and follow it to the end, continuing from
+/// `progress`.
+pub fn attach(
+    session: &Session,
+    session_id: &str,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    progress: &mut Progress,
+) -> Result<ExitInfo> {
+    let ch = session.open(&OpenRequest::Attach {
+        session_id: session_id.to_string(),
+        stdout_offset: progress.stdout,
+        stderr_offset: progress.stderr,
+    })?;
+    collect_tracked(&ch, stdout, Some(stderr), progress)
 }
 
 /// Run an `Exec` request, streaming output as it arrives.

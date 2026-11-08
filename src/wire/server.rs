@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 use super::messages::{hex, stream, Control, OpenRequest};
 use super::mux::{Channel, Event, Session};
-use super::pty;
+use super::{detach, pty};
 
 /// How long to keep draining output after the main process exits. Output
 /// from background processes that still hold the pipe is cut off after this.
@@ -107,6 +107,12 @@ pub struct ServerConfig {
     pub max_transfer_bytes: u64,
     pub ops: Arc<dyn GuestOps>,
     pub freeze: Arc<FreezeState>,
+    /// Detachable execs, shared by every connection to this agent.
+    pub sessions: Arc<detach::Registry>,
+    /// Output buffered per stream for a detachable exec.
+    pub detach_buffer_bytes: usize,
+    /// Grace period for a detachable exec that doesn't set `keep_secs`.
+    pub default_keep: Duration,
 }
 
 impl Default for ServerConfig {
@@ -115,6 +121,9 @@ impl Default for ServerConfig {
             max_transfer_bytes: 2 * 1024 * 1024 * 1024,
             ops: Arc::new(SystemOps),
             freeze: Arc::new(FreezeState::default()),
+            sessions: Arc::new(detach::Registry::default()),
+            detach_buffer_bytes: 1024 * 1024,
+            default_keep: Duration::from_secs(300),
         }
     }
 }
@@ -189,9 +198,18 @@ pub fn handle(ch: Channel, req: OpenRequest, config: &ServerConfig) {
             });
             ch.close();
         }
-        OpenRequest::Exec { command, workdir, env, user, timeout_secs } => {
+        OpenRequest::Exec { command, workdir, env, user, timeout_secs, session_id, keep_secs } => {
             let cmd = build_command(&command, &user, workdir.as_deref(), &env, None);
-            exec(ch, cmd, timeout_secs);
+            match session_id {
+                None => exec(ch, cmd, timeout_secs),
+                Some(id) => {
+                    let keep = if keep_secs == 0 { config.default_keep } else { Duration::from_secs(keep_secs) };
+                    detach::start(&config.sessions, ch, id, cmd, timeout_secs, keep, config.detach_buffer_bytes);
+                }
+            }
+        }
+        OpenRequest::Attach { session_id, stdout_offset, stderr_offset } => {
+            detach::attach(&config.sessions, ch, &session_id, stdout_offset, stderr_offset);
         }
         OpenRequest::Shell { user, command, cols, rows, term, workdir, env } => {
             let term = term.unwrap_or_else(|| "xterm-256color".into());
@@ -268,6 +286,23 @@ fn login_shell(user: &str, workdir: Option<&str>, env: &HashMap<String, String>,
     cmd
 }
 
+/// The agent runs with `oom_score_adj = -1000` so the guest OOM killer
+/// never picks it. Children inherit that, so reset it to 0 for everything
+/// the agent starts: user commands must stay killable.
+fn reset_oom_score(cmd: &mut Command) {
+    // SAFETY: open/write/close are async-signal-safe; nothing allocates.
+    unsafe {
+        cmd.pre_exec(|| {
+            let fd = libc::open(c"/proc/self/oom_score_adj".as_ptr(), libc::O_WRONLY);
+            if fd >= 0 {
+                libc::write(fd, b"0".as_ptr().cast(), 1);
+                libc::close(fd);
+            }
+            Ok(())
+        });
+    }
+}
+
 fn apply_env(
     cmd: &mut Command,
     user: &str,
@@ -275,6 +310,7 @@ fn apply_env(
     env: &HashMap<String, String>,
     term: Option<&str>,
 ) {
+    reset_oom_score(cmd);
     let home = home_for(user);
     match workdir {
         Some(dir) => {

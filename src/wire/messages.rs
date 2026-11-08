@@ -46,6 +46,26 @@ pub enum OpenRequest {
         /// 0 = no timeout.
         #[serde(default)]
         timeout_secs: u64,
+        /// Makes the exec survive a dropped connection: output is buffered
+        /// in the guest and any connection can [`OpenRequest::Attach`] to
+        /// it by this id. Without it, closing the channel kills the process.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        /// With `session_id`: how long the process may run with nobody
+        /// attached, and how long its output and status are kept after it
+        /// exits. 0 = the agent default.
+        #[serde(default)]
+        keep_secs: u64,
+    },
+
+    /// Attach to a detachable exec, replaying output from the given byte
+    /// offsets, then following it live until [`Control::Exit`].
+    Attach {
+        session_id: String,
+        #[serde(default)]
+        stdout_offset: u64,
+        #[serde(default)]
+        stderr_offset: u64,
     },
 
     /// Interactive login shell (or `command`) on a PTY. Output arrives on
@@ -128,6 +148,9 @@ pub enum Control {
     UploadDone { size: u64, sha256: String },
     /// A guest-control request (freeze, thaw, set clock) succeeded.
     Done,
+    /// While nobody was attached, `bytes` of `stream` output overflowed the
+    /// guest buffer and were dropped at this point in the stream.
+    OutputLost { stream: u8, bytes: u64 },
     Error { message: String },
 }
 
@@ -158,6 +181,8 @@ mod tests {
                 env: HashMap::new(),
                 user: "root".into(),
                 timeout_secs: 0,
+                session_id: None,
+                keep_secs: 0,
             }
         );
         let shell: OpenRequest = serde_json::from_str(r#"{"type":"shell"}"#).unwrap();

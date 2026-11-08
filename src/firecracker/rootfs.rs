@@ -14,6 +14,9 @@ Type=simple
 ExecStart=/usr/local/bin/claw-agent
 Restart=always
 RestartSec=1
+# The guest OOM killer must never pick the agent: without it the host loses
+# every session. Commands it starts reset their own score to 0.
+OOMScoreAdjust=-1000
 
 [Install]
 WantedBy=multi-user.target

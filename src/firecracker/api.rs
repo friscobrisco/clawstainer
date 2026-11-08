@@ -55,6 +55,12 @@ impl FirecrackerApi {
         self.send_request(&request)
     }
 
+    /// Send a GET request
+    pub fn get(&self, path: &str) -> Result<ApiResponse> {
+        let request = format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\n\r\n");
+        self.send_request(&request)
+    }
+
     /// Send a PATCH request
     pub fn patch(&self, path: &str, body: &serde_json::Value) -> Result<ApiResponse> {
         let body_str = serde_json::to_string(body)?;

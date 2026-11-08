@@ -36,6 +36,11 @@ const FAILED_DIR: &str = "/var/lib/clawstainer/failed";
 /// Ubuntu userspace takes several seconds, longer under nested virtualization.
 const AGENT_BOOT_TIMEOUT_MS: u64 = 60_000;
 
+/// How long an exec keeps running in the guest after its connection drops,
+/// and how many times the CLI tries to reattach to it.
+const EXEC_REATTACH_GRACE_SECS: u64 = 120;
+const EXEC_REATTACH_RETRIES: u32 = 5;
+
 /// Output kept per stream for a buffered exec; the rest is counted, not stored.
 const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
 
@@ -69,6 +74,27 @@ fn kill_and_wait(pid: u32) -> Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     bail!("Firecracker process {pid} did not exit")
+}
+
+const LOCKS_DIR: &str = "/var/lib/clawstainer/locks";
+
+/// Per-machine lock held for the whole of a pause or resume. The kernel
+/// drops it if the holder dies, which is how recovery tells an interrupted
+/// operation from one still in progress.
+fn op_lock(machine_id: &str, wait: bool) -> Result<Option<std::fs::File>> {
+    use fs2::FileExt;
+    mkdir_private(Path::new(LOCKS_DIR))?;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(Path::new(LOCKS_DIR).join(format!("{machine_id}.lock")))?;
+    if wait {
+        f.lock_exclusive()?;
+        Ok(Some(f))
+    } else {
+        Ok(f.try_lock_exclusive().ok().map(|_| f))
+    }
 }
 
 fn mkdir_private(path: &Path) -> Result<()> {
@@ -290,6 +316,43 @@ impl FirecrackerRuntime {
         })
     }
 
+    /// Repair a VM whose last pause was interrupted (e.g. the CLI was
+    /// killed mid-way): the VMM is alive with its vCPUs paused and the guest
+    /// frozen, and a plaintext snapshot may be sitting in its jail. Removes
+    /// the plaintext and any partial encrypted files, resumes the vCPUs, and
+    /// thaws the guest. A no-op for a healthy VM.
+    fn recover_interrupted_pause(machine_id: &str) -> Result<()> {
+        let work = Jail::host_path_for(machine_id, "/snapshot.work");
+        let api = Self::api(machine_id);
+        let vcpus_paused = api
+            .get("/")
+            .ok()
+            .and_then(|r| serde_json::from_str::<serde_json::Value>(&r.body).ok())
+            .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(|s| s == "Paused"))
+            .unwrap_or(false);
+        if !work.exists() && !vcpus_paused {
+            return Ok(());
+        }
+        // A pause or resume still in progress holds the lock: leave it be.
+        let Some(_lock) = op_lock(machine_id, false)? else {
+            return Ok(());
+        };
+        eprintln!("Recovering {machine_id} from an interrupted pause...");
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_dir_all(Jail::snapshot_dir_for(machine_id));
+        if vcpus_paused {
+            api_ok(api.patch("/vm", &serde_json::json!({ "state": "Resumed" })), "resume vCPUs")?;
+        }
+        // The guest's vsock can refuse the first connection right after its
+        // vCPUs resume; wait until the agent answers, then thaw.
+        let vsock = Self::vsock_path(machine_id);
+        fc_vsock::wait_for_agent(&vsock, 15_000)?;
+        let session = fc_vsock::connect_wire(&vsock)?;
+        wire::client::guest_control(&session, &wire::OpenRequest::Thaw)
+            .context("could not thaw the guest after an interrupted pause")?;
+        Ok(())
+    }
+
     /// The jail for an existing machine (its slot gives its uid).
     fn jail_for(machine_id: &str, state: &StateStore) -> Result<Jail> {
         let slot = state.with_read_lock(|s| {
@@ -443,23 +506,55 @@ impl Runtime for FirecrackerRuntime {
 
     fn exec(&self, machine_id: &str, opts: ExecOpts) -> Result<ExecResult> {
         require_linux()?;
+        Self::recover_interrupted_pause(machine_id)
+            .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
 
-        let session = fc_vsock::connect_wire(&Self::vsock_path(machine_id))
-            .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
+        let vsock = Self::vsock_path(machine_id);
+        let connect = || {
+            fc_vsock::connect_wire(&vsock)
+                .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))
+        };
 
+        // A detachable exec: if the vsock connection drops (VMM hiccup,
+        // host load), reconnect and resume the output where it stopped
+        // instead of killing the command.
+        let session_id = format!("exec-{:016x}", rand::random::<u64>());
         let req = wire::OpenRequest::Exec {
             command: opts.command,
             workdir: Some(opts.workdir),
             env: opts.env,
             user: opts.user,
             timeout_secs: opts.timeout,
+            session_id: Some(session_id.clone()),
+            keep_secs: EXEC_REATTACH_GRACE_SECS,
         };
         let mut stdout = CappedBuffer::new(MAX_EXEC_OUTPUT_BYTES);
         let mut stderr = CappedBuffer::new(MAX_EXEC_OUTPUT_BYTES);
-        let exit = wire::client::exec(&session, &req, None::<std::io::Empty>, &mut stdout, &mut stderr)
-            .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
+        let mut progress = wire::client::Progress::default();
 
-        let truncated = stdout.truncated() || stderr.truncated();
+        let session = connect()?;
+        let mut result = wire::client::exec_detachable(&session, &req, &mut stdout, &mut stderr, &mut progress);
+        drop(session);
+        // Once the command has started, a dropped connection (or the agent
+        // briefly unreachable while it restarts) is retried by reattaching.
+        let mut retries = 0;
+        let mut reattaching = false;
+        while let Err(e) = &result {
+            let retryable = e.is::<wire::client::ConnectionLost>() || (reattaching && e.is::<ClawError>());
+            if !retryable || retries == EXEC_REATTACH_RETRIES {
+                break;
+            }
+            retries += 1;
+            reattaching = true;
+            eprintln!("Connection to the guest agent dropped; reattaching ({retries}/{EXEC_REATTACH_RETRIES})...");
+            std::thread::sleep(std::time::Duration::from_millis(500 * retries as u64));
+            result = connect().map_err(anyhow::Error::from).and_then(|session| {
+                wire::client::attach(&session, &session_id, &mut stdout, &mut stderr, &mut progress)
+            });
+        }
+        let exit = result.map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
+
+        let truncated = stdout.truncated() || stderr.truncated() || progress.lost > 0;
         Ok(ExecResult {
             machine_id: machine_id.to_string(),
             exit_code: exit.exit_code(),
@@ -468,7 +563,7 @@ impl Runtime for FirecrackerRuntime {
             duration_ms: exit.duration_ms,
             timed_out: exit.timed_out,
             truncated,
-            total_bytes: truncated.then(|| stdout.total() + stderr.total()),
+            total_bytes: truncated.then(|| stdout.total() + stderr.total() + progress.lost),
             peak_memory_bytes: None,
             cpu_time_us: None,
         })
@@ -476,6 +571,8 @@ impl Runtime for FirecrackerRuntime {
 
     fn shell(&self, machine_id: &str, user: &str) -> Result<()> {
         require_linux()?;
+        Self::recover_interrupted_pause(machine_id)
+            .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
 
         let session = fc_vsock::connect_wire(&Self::vsock_path(machine_id))
             .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
@@ -534,6 +631,7 @@ impl Runtime for FirecrackerRuntime {
         // Jail (disk, sockets, log), cgroup, and encrypted snapshots.
         Jail::remove(machine_id);
         let _ = std::fs::remove_dir_all(Jail::snapshot_dir_for(machine_id));
+        let _ = std::fs::remove_file(Path::new(LOCKS_DIR).join(format!("{machine_id}.lock")));
 
         state.with_lock(|s| {
             s.machines.remove(machine_id);
@@ -564,6 +662,8 @@ impl Runtime for FirecrackerRuntime {
         }
         let pid = Self::live_pid(machine_id, machine.pid)
             .ok_or_else(|| anyhow!("{machine_id} has no running Firecracker process"))?;
+        Self::recover_interrupted_pause(machine_id)?;
+        let _lock = op_lock(machine_id, true)?;
         let jail = Self::jail_for(machine_id, state)?;
         let assets = assets::ensure_assets()?;
         let meta = SnapshotBinding::current(machine_id, &assets.kernel)?;
@@ -658,6 +758,12 @@ impl Runtime for FirecrackerRuntime {
             expected.check(&found, kind)?;
         }
 
+        let _lock = op_lock(machine_id, true)?;
+        // An interrupted earlier resume may have left a VMM (and plaintext)
+        // behind; start from a clean jail.
+        if let Some(pid) = Self::live_pid(machine_id, None) {
+            kill_and_wait(pid)?;
+        }
         let work_inner = "/snapshot.work";
         let work = jail.host_path(work_inner);
         let _ = std::fs::remove_dir_all(&work);

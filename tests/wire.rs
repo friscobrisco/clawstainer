@@ -37,6 +37,8 @@ fn exec_req(command: &str, workdir: &str) -> OpenRequest {
         env: HashMap::new(),
         user: "root".into(),
         timeout_secs: 0,
+        session_id: None,
+        keep_secs: 0,
     }
 }
 
@@ -90,6 +92,8 @@ fn exec_passes_env() {
         env,
         user: "root".into(),
         timeout_secs: 0,
+        session_id: None,
+        keep_secs: 0,
     };
     let mut out = Vec::new();
     client::exec(&s, &req, None::<io::Empty>, &mut out, &mut io::sink()).unwrap();
@@ -119,6 +123,8 @@ fn exec_timeout_kills_process_group() {
         env: HashMap::new(),
         user: "root".into(),
         timeout_secs: 1,
+        session_id: None,
+        keep_secs: 0,
     };
     let start = Instant::now();
     let exit = client::exec(&s, &req, None::<io::Empty>, &mut io::sink(), &mut io::sink()).unwrap();
@@ -496,4 +502,171 @@ fn freeze_failure_is_reported() {
     let s = pair_with(config_with(ops), Config::default());
     let err = client::guest_control(&s, &OpenRequest::Freeze { auto_thaw_secs: 30 }).unwrap_err();
     assert!(err.to_string().contains("device busy"), "{err}");
+}
+
+// ---- detachable execs ----------------------------------------------------
+
+fn detachable(command: &str, id: &str, keep_secs: u64) -> OpenRequest {
+    OpenRequest::Exec {
+        command: command.into(),
+        workdir: Some("/".into()),
+        env: HashMap::new(),
+        user: "root".into(),
+        timeout_secs: 0,
+        session_id: Some(id.into()),
+        keep_secs,
+    }
+}
+
+/// Read stdout until it contains `marker`, tracking progress like the
+/// client does. Returns what was read.
+fn read_until(ch: &clawstainer::wire::Channel, marker: &str, progress: &mut client::Progress) -> String {
+    let mut out = String::new();
+    while !out.contains(marker) {
+        match ch.recv().expect("channel closed early") {
+            Event::Data { stream: stream::STDOUT, bytes } => {
+                progress.stdout += bytes.len() as u64;
+                out.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            Event::Data { stream: stream::STDERR, bytes } => progress.stderr += bytes.len() as u64,
+            _ => {}
+        }
+    }
+    out
+}
+
+#[test]
+fn reattach_resumes_output_exactly_after_a_dropped_connection() {
+    let cfg = ServerConfig::default();
+    let s1 = pair_with(cfg.clone(), Config::default());
+    let ch = s1
+        .open(&detachable("for i in $(seq 1 40); do echo line$i; sleep 0.02; done; exit 4", "job-1", 30))
+        .unwrap();
+    ch.send_eof(stream::STDIN).unwrap();
+    let mut progress = client::Progress::default();
+    let first = read_until(&ch, "line5\n", &mut progress);
+    drop(s1); // the connection dies mid-command
+
+    std::thread::sleep(Duration::from_millis(200));
+    let s2 = pair_with(cfg, Config::default());
+    let mut rest = Vec::new();
+    let exit = client::attach(&s2, "job-1", &mut rest, &mut io::sink(), &mut progress).unwrap();
+    assert_eq!(exit.code, Some(4));
+    let all = first + &String::from_utf8(rest).unwrap();
+    let expected: String = (1..=40).map(|i| format!("line{i}\n")).collect();
+    assert_eq!(all, expected, "output was duplicated or lost across the reattach");
+    assert_eq!(progress.lost, 0);
+}
+
+#[test]
+fn exit_while_detached_is_kept_for_reattach() {
+    let cfg = ServerConfig::default();
+    let s1 = pair_with(cfg.clone(), Config::default());
+    let ch = s1.open(&detachable("echo a; sleep 0.3; echo b; echo e >&2; exit 9", "job-2", 30)).unwrap();
+    ch.send_eof(stream::STDIN).unwrap();
+    let mut progress = client::Progress::default();
+    read_until(&ch, "a\n", &mut progress);
+    drop(s1);
+    std::thread::sleep(Duration::from_millis(800)); // finishes while detached
+
+    let s2 = pair_with(cfg, Config::default());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let exit = client::attach(&s2, "job-2", &mut out, &mut err, &mut progress).unwrap();
+    assert_eq!(exit.code, Some(9));
+    assert_eq!(out, b"b\n");
+    assert_eq!(err, b"e\n");
+}
+
+#[test]
+fn abandoned_session_is_killed_after_its_grace_period() {
+    let cfg = ServerConfig::default();
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("pid");
+    let s1 = pair_with(cfg.clone(), Config::default());
+    let cmd = format!("echo $$ > {}; echo started; exec sleep 30", marker.display());
+    let ch = s1.open(&detachable(&cmd, "job-3", 1)).unwrap();
+    ch.send_eof(stream::STDIN).unwrap();
+    read_until(&ch, "started", &mut client::Progress::default());
+    let pid: i32 = fs::read_to_string(&marker).unwrap().trim().parse().unwrap();
+    drop(s1);
+
+    assert!(unsafe { libc::kill(pid, 0) } == 0, "killed too early");
+    let gone = wait_until(Duration::from_secs(5), || unsafe { libc::kill(pid, 0) } != 0);
+    assert!(gone, "abandoned process {pid} was not killed");
+    // Once its status has also expired, the session is forgotten.
+    let s2 = pair_with(cfg, Config::default());
+    let forgotten = wait_until(Duration::from_secs(5), || {
+        client::attach(&s2, "job-3", &mut io::sink(), &mut io::sink(), &mut client::Progress::default())
+            .map_err(|e| e.to_string().contains("no session"))
+            .err()
+            .unwrap_or(false)
+    });
+    assert!(forgotten);
+}
+
+#[test]
+fn overflow_while_detached_is_reported_not_hidden() {
+    let cfg = ServerConfig { detach_buffer_bytes: 1000, ..ServerConfig::default() };
+    let s1 = pair_with(cfg.clone(), Config::default());
+    let ch = s1
+        .open(&detachable("echo start; sleep 0.3; head -c 50000 /dev/zero | tr '\\0' x; echo; echo tail", "job-4", 30))
+        .unwrap();
+    ch.send_eof(stream::STDIN).unwrap();
+    let mut progress = client::Progress::default();
+    read_until(&ch, "start\n", &mut progress);
+    drop(s1);
+    std::thread::sleep(Duration::from_millis(1000));
+
+    let s2 = pair_with(cfg, Config::default());
+    let mut out = Vec::new();
+    let exit = client::attach(&s2, "job-4", &mut out, &mut io::sink(), &mut progress).unwrap();
+    assert_eq!(exit.code, Some(0));
+    assert!(progress.lost > 40_000, "lost = {}", progress.lost);
+    assert!(out.len() <= 1000);
+    assert!(String::from_utf8_lossy(&out).ends_with("\ntail\n"));
+    // Offsets still account for every byte the process wrote.
+    assert_eq!(progress.stdout, 6 + 50_000 + 1 + 5);
+}
+
+#[test]
+fn newer_attach_supersedes_older_and_unknown_sessions_are_refused() {
+    let cfg = ServerConfig::default();
+    let s = pair_with(cfg.clone(), Config::default());
+    let ch = s.open(&detachable("echo go; sleep 1; echo done", "job-5", 30)).unwrap();
+    ch.send_eof(stream::STDIN).unwrap();
+    read_until(&ch, "go", &mut client::Progress::default());
+
+    let s2 = pair_with(cfg.clone(), Config::default());
+    let attached = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let p = &mut client::Progress { stdout: 3, ..Default::default() };
+        let exit = client::attach(&s2, "job-5", &mut out, &mut io::sink(), p).unwrap();
+        (exit.code, out)
+    });
+    // The original channel is told it lost the session.
+    let reason = loop {
+        match ch.recv().expect("closed without a reason") {
+            Event::Control(Control::Error { message }) => break message,
+            _ => {}
+        }
+    };
+    assert!(reason.contains("another connection"), "{reason}");
+    assert_eq!(attached.join().unwrap(), (Some(0), b"done\n".to_vec()));
+
+    let err = client::attach(&s, "nope", &mut io::sink(), &mut io::sink(), &mut client::Progress::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("no session"), "{err}");
+}
+
+#[test]
+fn starting_a_duplicate_session_id_is_refused() {
+    let cfg = ServerConfig::default();
+    let s = pair_with(cfg, Config::default());
+    let a = s.open(&detachable("sleep 1", "dup", 30)).unwrap();
+    a.send_eof(stream::STDIN).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let mut p = client::Progress::default();
+    let err = client::exec_detachable(&s, &detachable("true", "dup", 30), &mut io::sink(), &mut io::sink(), &mut p)
+        .unwrap_err();
+    assert!(err.to_string().contains("already exists"), "{err}");
 }
