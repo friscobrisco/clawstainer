@@ -1,21 +1,46 @@
-use anyhow::Result;
-use std::process::Command;
+//! Firecracker microVM runtime.
+//!
+//! Every VM runs under Firecracker's jailer (see `firecracker::jail`): its
+//! own chroot, its own unprivileged uid/gid with no capabilities, and a
+//! cgroup with memory/CPU/process limits. Each VM also gets its own routed
+//! TAP and firewall chain (`clawstainer::vmnet`), and talks to the host only
+//! over vsock using the CLAW/2 protocol (`clawstainer::wire`).
+//!
+//! A per-VM slot (in `state.network.vm_slots`) determines both the VM's
+//! network addresses and its uid, so they never collide.
 
-use crate::error::ClawError;
-use crate::firecracker::{api::FirecrackerApi, assets, rootfs, vsock as fc_vsock};
+use anyhow::{anyhow, bail, Context, Result};
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
 use clawstainer::snapcrypt::{self, LocalKeyStore, SnapshotMeta};
 use clawstainer::vmnet::{self, VmNet};
-use anyhow::{anyhow, bail, Context};
-use std::os::unix::fs::DirBuilderExt;
-use std::path::PathBuf;
-use std::time::Instant;
 use clawstainer::wire;
 
-const KEYS_DIR: &str = "/var/lib/clawstainer/keys";
+use crate::error::ClawError;
+use crate::firecracker::jail::{self, Jail};
+use crate::firecracker::{api::FirecrackerApi, assets, rootfs, vsock as fc_vsock};
+use crate::network;
+use crate::state::{Machine, StateStore};
 
-fn machine_dir(machine_id: &str) -> PathBuf {
-    PathBuf::from(MACHINES_DIR).join(machine_id)
-}
+use super::{
+    require_linux, CreateOpts, DestroyResult, ExecOpts, ExecResult, MachineInfo, MachineStatus,
+    PauseResult, Runtime,
+};
+
+const KEYS_DIR: &str = "/var/lib/clawstainer/keys";
+const FAILED_DIR: &str = "/var/lib/clawstainer/failed";
+
+/// How long a cold boot may take before the guest agent must answer. A full
+/// Ubuntu userspace takes several seconds, longer under nested virtualization.
+const AGENT_BOOT_TIMEOUT_MS: u64 = 60_000;
+
+/// Output kept per stream for a buffered exec; the rest is counted, not stored.
+const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
+
+/// Snapshot create/load of a large VM can take minutes on slow disks.
+const SNAPSHOT_API_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Turn a non-2xx Firecracker API response into an error.
 fn api_ok(resp: Result<crate::firecracker::api::ApiResponse>, what: &str) -> Result<()> {
@@ -26,15 +51,19 @@ fn api_ok(resp: Result<crate::firecracker::api::ApiResponse>, what: &str) -> Res
     Ok(())
 }
 
+fn alive(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks for existence.
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
 /// SIGKILL a VMM and wait (up to 2 s) for it to disappear.
 fn kill_and_wait(pid: u32) -> Result<()> {
-    let alive = || unsafe { libc::kill(pid as i32, 0) } == 0;
     // SAFETY: plain kill(2) on a pid we verified belongs to the VM.
     unsafe {
         libc::kill(pid as i32, libc::SIGKILL);
     }
     for _ in 0..100 {
-        if !alive() {
+        if !alive(pid) {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -42,22 +71,12 @@ fn kill_and_wait(pid: u32) -> Result<()> {
     bail!("Firecracker process {pid} did not exit")
 }
 
-/// Start a bare Firecracker for `machine_id` (API socket + log in the
-/// machine dir) and record its pid.
-fn spawn_firecracker(fc_bin: &std::path::Path, machine_id: &str) -> Result<u32> {
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(machine_dir(machine_id).join("firecracker.log"))?;
-    let child = Command::new(fc_bin)
-        .args(["--api-sock", &FirecrackerRuntime::socket_path(machine_id)])
-        .stdout(log.try_clone()?)
-        .stderr(log)
-        .spawn()
-        .context("Failed to start Firecracker")?;
-    let pid = child.id();
-    std::fs::write(FirecrackerRuntime::pid_path(machine_id), pid.to_string())?;
-    Ok(pid)
+fn mkdir_private(path: &Path) -> Result<()> {
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+        .with_context(|| format!("cannot create {}", path.display()))
 }
 
 /// What a snapshot must match to be restorable on this host.
@@ -68,7 +87,7 @@ struct SnapshotBinding {
 }
 
 impl SnapshotBinding {
-    fn current(sandbox_id: &str, kernel: &std::path::Path) -> Result<SnapshotBinding> {
+    fn current(sandbox_id: &str, kernel: &Path) -> Result<SnapshotBinding> {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
         std::io::copy(&mut std::fs::File::open(kernel)?, &mut hasher)?;
@@ -132,73 +151,47 @@ fn cpu_model() -> String {
     }
 }
 
-/// Kills the VM process and removes its directory on drop unless disarmed,
-/// so a failed create doesn't leave a running Firecracker behind.
-struct VmGuard {
+/// Undoes a partial create on drop unless disarmed: kills the VMM, tears
+/// down the network, removes the jail and cgroup, and releases the slot.
+/// The Firecracker log is kept in `FAILED_DIR` for debugging.
+struct CreateGuard<'a> {
+    state: &'a StateStore,
     id: String,
+    slot: Option<u32>,
+    net: Option<VmNet>,
     pid: Option<u32>,
+    armed: bool,
 }
 
-impl VmGuard {
-    fn disarm(&mut self) {
-        self.id.clear();
-    }
-}
-
-impl Drop for VmGuard {
+impl Drop for CreateGuard<'_> {
     fn drop(&mut self) {
-        if self.id.is_empty() {
+        if !self.armed {
             return;
         }
         if let Some(pid) = self.pid {
-            // SAFETY: plain kill(2); the pid is our own child.
+            let _ = kill_and_wait(pid);
+            // SAFETY: reap our own child so it doesn't linger as a zombie.
             unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
-                libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
+                libc::waitpid(pid as i32, std::ptr::null_mut(), libc::WNOHANG);
             }
         }
-        // Keep the log of a failed create for debugging.
-        let failed_dir = "/var/lib/clawstainer/failed";
-        let _ = std::fs::create_dir_all(failed_dir);
+        if let Some(vm) = &self.net {
+            vmnet::teardown(vm);
+        }
+        let _ = std::fs::create_dir_all(FAILED_DIR);
         let _ = std::fs::copy(
-            format!("{MACHINES_DIR}/{}/firecracker.log", self.id),
-            format!("{failed_dir}/{}.log", self.id),
+            Jail::host_path_for(&self.id, jail::LOG),
+            format!("{FAILED_DIR}/{}.log", self.id),
         );
-        let _ = rootfs::cleanup_vm_rootfs(&self.id);
-    }
-}
-
-/// Tears down a VM's network on drop unless disarmed, so a failed create
-/// doesn't leak a TAP, a firewall chain, or an address slot.
-struct NetGuard<'a> {
-    state: &'a StateStore,
-    vm: Option<VmNet>,
-}
-
-impl NetGuard<'_> {
-    fn disarm(&mut self) {
-        self.vm = None;
-    }
-}
-
-impl Drop for NetGuard<'_> {
-    fn drop(&mut self) {
-        if let Some(vm) = self.vm.take() {
-            vmnet::teardown(&vm);
+        Jail::remove(&self.id);
+        if let Some(slot) = self.slot {
             let _ = self.state.with_lock(|s| {
-                s.network.vm_slots.remove(&vm.slot);
+                s.network.vm_slots.remove(&slot);
                 Ok(())
             });
         }
     }
 }
-
-/// How long a cold boot may take before the guest agent must answer. A full
-/// Ubuntu userspace takes several seconds, longer under nested virtualization.
-const AGENT_BOOT_TIMEOUT_MS: u64 = 60_000;
-
-/// Output kept per stream for a buffered exec; the rest is counted, not stored.
-const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
 
 /// A writer that keeps the first `cap` bytes and counts everything.
 struct CappedBuffer {
@@ -233,15 +226,6 @@ impl std::io::Write for CappedBuffer {
         Ok(())
     }
 }
-use crate::network;
-use crate::state::{Machine, StateStore};
-
-use super::{
-    require_linux, CreateOpts, DestroyResult, ExecOpts, ExecResult, MachineInfo, MachineStatus,
-    PauseResult, Runtime,
-};
-
-const MACHINES_DIR: &str = "/var/lib/clawstainer/machines";
 
 pub struct FirecrackerRuntime;
 
@@ -273,8 +257,20 @@ impl FirecrackerRuntime {
         format!("{adj}-{animal}")
     }
 
-    fn pid_path(machine_id: &str) -> String {
-        format!("{MACHINES_DIR}/{machine_id}/firecracker.pid")
+    fn socket_path(machine_id: &str) -> PathBuf {
+        Jail::host_path_for(machine_id, jail::API_SOCK)
+    }
+
+    fn vsock_path(machine_id: &str) -> String {
+        Jail::host_path_for(machine_id, jail::VSOCK).display().to_string()
+    }
+
+    fn pid_path(machine_id: &str) -> PathBuf {
+        Jail::host_path_for(machine_id, jail::PID_FILE)
+    }
+
+    fn api(machine_id: &str) -> FirecrackerApi {
+        FirecrackerApi::new(&Self::socket_path(machine_id).display().to_string())
     }
 
     /// The live Firecracker pid for this machine, if it is running. Checks
@@ -294,12 +290,13 @@ impl FirecrackerRuntime {
         })
     }
 
-    fn socket_path(machine_id: &str) -> String {
-        format!("{MACHINES_DIR}/{machine_id}/firecracker.sock")
-    }
-
-    fn vsock_path(machine_id: &str) -> String {
-        format!("{MACHINES_DIR}/{machine_id}/vsock.sock")
+    /// The jail for an existing machine (its slot gives its uid).
+    fn jail_for(machine_id: &str, state: &StateStore) -> Result<Jail> {
+        let slot = state.with_read_lock(|s| {
+            Ok(s.network.vm_slots.iter().find(|(_, m)| m.as_str() == machine_id).map(|(k, _)| *k))
+        })?;
+        let slot = slot.ok_or_else(|| anyhow!("{machine_id} has no slot; it predates jailing"))?;
+        Ok(Jail::new(machine_id, slot))
     }
 }
 
@@ -310,135 +307,92 @@ impl Runtime for FirecrackerRuntime {
         let id = Self::generate_id();
         let name = opts.name.unwrap_or_else(Self::generate_name);
 
-        // Ensure Firecracker binary and kernel are available
-        let (fc_bin, kernel_path) = assets::ensure_assets()
-            .map_err(|e| ClawError::CreateFailed(format!("Asset setup failed: {e}")))?;
+        let assets = assets::ensure_assets()
+            .map_err(|e| ClawError::CreateFailed(format!("Asset setup failed: {e:#}")))?;
 
-        // Everything created from here on is removed again if create fails.
-        let mut vm_guard = VmGuard { id: id.clone(), pid: None };
+        // Everything created from here on is undone if create fails.
+        let mut guard = CreateGuard { state, id: id.clone(), slot: None, net: None, pid: None, armed: true };
 
-        // Create per-VM rootfs
-        let vm_rootfs = rootfs::create_vm_rootfs(&id)
-            .map_err(|e| ClawError::CreateFailed(format!("Rootfs creation failed: {e}")))?;
+        // One slot gives the VM both its uid and its network addresses.
+        let slot = state.with_lock(|s| {
+            let slot = vmnet::allocate_slot(&s.network.vm_slots)?;
+            s.network.vm_slots.insert(slot, id.clone());
+            Ok(slot)
+        })?;
+        guard.slot = Some(slot);
+        let jail = Jail::new(&id, slot);
+        jail.prepare(&assets.kernel)
+            .map_err(|e| ClawError::CreateFailed(format!("Jail setup failed: {e:#}")))?;
 
-        // Network setup: a routed TAP with its own /30 and firewall chain.
-        // The guard tears it down again if any later step fails.
-        let mut net_guard = NetGuard { state, vm: None };
-        if opts.network == "nat" {
-            let slot = state.with_lock(|s| {
-                let slot = vmnet::allocate_slot(&s.network.vm_slots)?;
-                s.network.vm_slots.insert(slot, id.clone());
-                Ok(slot)
-            })?;
+        let vm_rootfs = jail.host_path(jail::ROOTFS);
+        rootfs::create_vm_rootfs(&vm_rootfs)
+            .map_err(|e| ClawError::CreateFailed(format!("Rootfs creation failed: {e:#}")))?;
+        jail.give(&vm_rootfs)?;
+
+        // A routed TAP owned by the VM's uid (the jailed VMM has no
+        // CAP_NET_ADMIN), with its own /30 and firewall chain.
+        let net = if opts.network == "nat" {
             let vm = VmNet::new(slot, &id)?;
-            net_guard.vm = Some(vm.clone());
-            vmnet::setup(&vm)
+            guard.net = Some(vm.clone());
+            vmnet::setup_owned(&vm, Some((jail.uid, jail.gid)))
                 .map_err(|e| ClawError::CreateFailed(format!("Network setup failed: {e:#}")))?;
-        }
-        let ip = net_guard.vm.as_ref().map(|vm| vm.guest_ip.to_string());
+            Some(vm)
+        } else {
+            None
+        };
+        let ip = net.as_ref().map(|vm| vm.guest_ip.to_string());
 
-        // Prepare socket path
-        let sock_path = Self::socket_path(&id);
-
-        // Remove stale socket if exists
-        let _ = std::fs::remove_file(&sock_path);
-
-        // Start Firecracker process
-        // Firecracker's own log (and the guest serial console) go here.
-        let log_path = format!("{MACHINES_DIR}/{id}/firecracker.log");
-        let log = std::fs::File::create(&log_path)
-            .map_err(|e| ClawError::CreateFailed(format!("Cannot create {log_path}: {e}")))?;
-        let child = Command::new(fc_bin.to_str().unwrap())
-            .args(["--api-sock", &sock_path])
-            .stdout(log.try_clone()?)
-            .stderr(log)
-            .spawn()
-            .map_err(|e| ClawError::CreateFailed(format!("Failed to start Firecracker: {e}")))?;
-
-        let pid = child.id();
-        vm_guard.pid = Some(pid);
-        std::fs::write(Self::pid_path(&id), pid.to_string())
-            .map_err(|e| ClawError::CreateFailed(format!("Cannot write pid file: {e}")))?;
+        let pid = jail
+            .spawn(&assets.jailer, &assets.firecracker, opts.memory_mb, opts.cpus)
+            .map_err(|e| ClawError::CreateFailed(format!("{e:#}")))?;
+        guard.pid = Some(pid);
         let now = chrono::Utc::now();
 
-        // Wait for API to be ready
-        let api = FirecrackerApi::new(&sock_path);
+        let api = Self::api(&id);
         api.wait_for_ready(5000)
             .map_err(|e| ClawError::CreateFailed(format!("Firecracker API not ready: {e}")))?;
 
-        // Configure the VM via API
+        // Every path below is inside the jail.
         let base_args = "console=ttyS0 reboot=k panic=1 pci=off";
-        let boot_args = match &net_guard.vm {
+        let boot_args = match &net {
             Some(vm) => format!("{base_args} {}", vm.kernel_ip_arg()),
             None => base_args.to_string(),
         };
-
-        // PUT /boot-source
-        let resp = api.put("/boot-source", &serde_json::json!({
-            "kernel_image_path": kernel_path.to_str().unwrap(),
-            "boot_args": boot_args,
-        }))?;
-        if !resp.is_success() {
-            return Err(ClawError::CreateFailed(format!("Failed to set boot source: {}", resp.body)).into());
-        }
-
-        // PUT /drives/rootfs
-        let resp = api.put("/drives/rootfs", &serde_json::json!({
-            "drive_id": "rootfs",
-            "path_on_host": vm_rootfs.to_str().unwrap(),
-            "is_root_device": true,
-            "is_read_only": false,
-        }))?;
-        if !resp.is_success() {
-            return Err(ClawError::CreateFailed(format!("Failed to set drive: {}", resp.body)).into());
-        }
-
-        // PUT /network-interfaces/eth0 (only if NAT networking)
-        if let Some(vm) = &net_guard.vm {
-            let resp = api.put("/network-interfaces/eth0", &serde_json::json!({
-                "iface_id": "eth0",
-                "guest_mac": vm.mac,
-                "host_dev_name": vm.tap,
-            }))?;
-            if !resp.is_success() {
-                return Err(ClawError::CreateFailed(format!("Failed to set network: {}", resp.body)).into());
+        let configure = || -> Result<()> {
+            api_ok(api.put("/boot-source", &serde_json::json!({
+                "kernel_image_path": jail::KERNEL,
+                "boot_args": boot_args,
+            })), "set the boot source")?;
+            api_ok(api.put("/drives/rootfs", &serde_json::json!({
+                "drive_id": "rootfs",
+                "path_on_host": jail::ROOTFS,
+                "is_root_device": true,
+                "is_read_only": false,
+            })), "attach the root disk")?;
+            if let Some(vm) = &net {
+                api_ok(api.put("/network-interfaces/eth0", &serde_json::json!({
+                    "iface_id": "eth0",
+                    "guest_mac": vm.mac,
+                    "host_dev_name": vm.tap,
+                })), "attach the network")?;
             }
-        }
+            api_ok(api.put("/machine-config", &serde_json::json!({
+                "vcpu_count": opts.cpus,
+                "mem_size_mib": opts.memory_mb,
+            })), "set the machine config")?;
+            api_ok(api.put("/vsock", &serde_json::json!({
+                "vsock_id": "1",
+                "guest_cid": 3,
+                "uds_path": jail::VSOCK,
+            })), "attach vsock")?;
+            api_ok(api.put("/actions", &serde_json::json!({ "action_type": "InstanceStart" })), "start the VM")
+        };
+        configure().map_err(|e| ClawError::CreateFailed(format!("{e:#}")))?;
 
-        // PUT /machine-config
-        let resp = api.put("/machine-config", &serde_json::json!({
-            "vcpu_count": opts.cpus,
-            "mem_size_mib": opts.memory_mb,
-        }))?;
-        if !resp.is_success() {
-            return Err(ClawError::CreateFailed(format!("Failed to set machine config: {}", resp.body)).into());
-        }
-
-        // PUT /vsock — enables host<->guest communication
-        let vsock_path = Self::vsock_path(&id);
-        let resp = api.put("/vsock", &serde_json::json!({
-            "vsock_id": "1",
-            "guest_cid": 3,
-            "uds_path": vsock_path,
-        }))?;
-        if !resp.is_success() {
-            return Err(ClawError::CreateFailed(format!("Failed to set vsock: {}", resp.body)).into());
-        }
-
-        // Start the VM
-        let resp = api.put("/actions", &serde_json::json!({
-            "action_type": "InstanceStart",
-        }))?;
-        if !resp.is_success() {
-            return Err(ClawError::CreateFailed(format!("Failed to start VM: {}", resp.body)).into());
-        }
-
-        // Wait for guest agent to become reachable
         eprintln!("Waiting for guest agent...");
-        fc_vsock::wait_for_agent(&vsock_path, AGENT_BOOT_TIMEOUT_MS)
+        fc_vsock::wait_for_agent(&Self::vsock_path(&id), AGENT_BOOT_TIMEOUT_MS)
             .map_err(|e| ClawError::CreateFailed(format!("Guest agent not reachable: {e}")))?;
 
-        // Save to state
         let machine = Machine {
             id: id.clone(),
             name: name.clone(),
@@ -458,19 +412,15 @@ impl Runtime for FirecrackerRuntime {
             linger: opts.linger,
             fleet_name: None,
         };
-
         state.with_lock(|s| {
             s.machines.insert(id.clone(), machine);
             Ok(())
         })?;
-        net_guard.disarm();
-        vm_guard.disarm();
+        guard.armed = false;
 
-        // Auto-destroy timeout.
-        // We call the full destroy() path (not just `pkill`) so that state.json,
-        // the IP allocation, the TAP device, and the rootfs are all cleaned up.
-        // Otherwise `claw list` would keep showing the VM as running and its
-        // resources would leak until the user ran destroy manually.
+        // NOTE: this thread lives in the CLI process, which exits right after
+        // create returns, so the timeout only fires for long-lived callers.
+        // Enforcing timeouts belongs in the host daemon / control plane (M2).
         if opts.timeout > 0 {
             let timeout = opts.timeout;
             let destroy_id = id.clone();
@@ -494,8 +444,7 @@ impl Runtime for FirecrackerRuntime {
     fn exec(&self, machine_id: &str, opts: ExecOpts) -> Result<ExecResult> {
         require_linux()?;
 
-        let vsock_path = Self::vsock_path(machine_id);
-        let session = fc_vsock::connect_wire(&vsock_path)
+        let session = fc_vsock::connect_wire(&Self::vsock_path(machine_id))
             .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
 
         let req = wire::OpenRequest::Exec {
@@ -528,8 +477,7 @@ impl Runtime for FirecrackerRuntime {
     fn shell(&self, machine_id: &str, user: &str) -> Result<()> {
         require_linux()?;
 
-        let vsock_path = Self::vsock_path(machine_id);
-        let session = fc_vsock::connect_wire(&vsock_path)
+        let session = fc_vsock::connect_wire(&Self::vsock_path(machine_id))
             .map_err(|e| ClawError::ExecFailed(format!("Cannot reach guest agent: {e:#}")))?;
         let exit = wire::client::interactive_shell(&session, user, None)
             .map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
@@ -560,62 +508,35 @@ impl Runtime for FirecrackerRuntime {
         // Ask the guest to shut down (x86 only; aarch64 has no Ctrl-Alt-Del),
         // give it a moment, then make sure the VMM is gone.
         if let Some(pid) = Self::live_pid(machine_id, machine.pid) {
-            let sock_path = Self::socket_path(machine_id);
-            if std::path::Path::new(&sock_path).exists() {
-                let api = FirecrackerApi::new(&sock_path);
-                let _ = api.put("/actions", &serde_json::json!({
-                    "action_type": "SendCtrlAltDel",
-                }));
+            if Self::socket_path(machine_id).exists() {
+                let _ = Self::api(machine_id)
+                    .put("/actions", &serde_json::json!({ "action_type": "SendCtrlAltDel" }));
             }
-            let alive = || unsafe { libc::kill(pid as i32, 0) } == 0;
             for _ in 0..30 {
-                if !alive() {
+                if !alive(pid) {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            if alive() {
-                // SAFETY: plain kill(2) on the VM's own pid (verified above).
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGKILL);
-                }
-                for _ in 0..50 {
-                    if !alive() {
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                }
-            }
-            if alive() {
-                return Err(ClawError::ExecFailed(format!(
-                    "Firecracker process {pid} for {machine_id} did not exit"
-                ))
-                .into());
+            if alive(pid) {
+                kill_and_wait(pid).map_err(|e| ClawError::ExecFailed(format!("{e:#}")))?;
             }
         }
 
-        // Clean up the VM's network: its TAP, firewall chain, and slot.
+        // Network: TAP, firewall chain.
         let slot = state.with_read_lock(|s| {
             Ok(s.network.vm_slots.iter().find(|(_, m)| m.as_str() == machine_id).map(|(k, _)| *k))
         })?;
-        match slot.map(|slot| VmNet::new(slot, machine_id)) {
-            Some(Ok(vm)) => vmnet::teardown(&vm),
-            // Machines created before per-VM networking used a bridged TAP.
-            _ => {
-                let _ = network::tap::delete_tap(&network::tap::tap_name(machine_id));
-            }
+        if let Some(Ok(vm)) = slot.map(|slot| VmNet::new(slot, machine_id)) {
+            vmnet::teardown(&vm);
         }
 
-        // Clean up rootfs and socket
-        let _ = rootfs::cleanup_vm_rootfs(machine_id);
+        // Jail (disk, sockets, log), cgroup, and encrypted snapshots.
+        Jail::remove(machine_id);
+        let _ = std::fs::remove_dir_all(Jail::snapshot_dir_for(machine_id));
 
-        // Release IP and remove from state
         state.with_lock(|s| {
-            if let Some(m) = s.machines.remove(machine_id) {
-                if let Some(ref ip) = m.ip {
-                    network::ipam::release(&mut s.network, ip);
-                }
-            }
+            s.machines.remove(machine_id);
             s.network.vm_slots.retain(|_, m| m.as_str() != machine_id);
             if s.network.vm_slots.is_empty() {
                 let _ = vmnet::remove_table();
@@ -643,16 +564,21 @@ impl Runtime for FirecrackerRuntime {
         }
         let pid = Self::live_pid(machine_id, machine.pid)
             .ok_or_else(|| anyhow!("{machine_id} has no running Firecracker process"))?;
-        let (_, kernel_path) = assets::ensure_assets()?;
-        let meta = SnapshotBinding::current(machine_id, &kernel_path)?;
+        let jail = Self::jail_for(machine_id, state)?;
+        let assets = assets::ensure_assets()?;
+        let meta = SnapshotBinding::current(machine_id, &assets.kernel)?;
 
-        let dir = machine_dir(machine_id);
-        let work = dir.join("snapshot.work");
+        // Firecracker (as the VM uid) writes the plaintext snapshot into a
+        // private directory in its jail; only the encrypted result leaves it.
+        let work_inner = "/snapshot.work";
+        let work = jail.host_path(work_inner);
         let _ = std::fs::remove_dir_all(&work);
-        std::fs::DirBuilder::new().mode(0o700).create(&work)?;
-        let (mem_enc, state_enc) = (dir.join("memory.snap"), dir.join("vmstate.snap"));
-        let api = FirecrackerApi::new(&Self::socket_path(machine_id))
-            .with_timeout(std::time::Duration::from_secs(600));
+        mkdir_private(&work)?;
+        jail.give(&work)?;
+        let snap_dir = Jail::snapshot_dir_for(machine_id);
+        mkdir_private(&snap_dir)?;
+        let (mem_enc, state_enc) = (snap_dir.join("memory.snap"), snap_dir.join("vmstate.snap"));
+        let api = Self::api(machine_id).with_timeout(SNAPSHOT_API_TIMEOUT);
         let vsock = Self::vsock_path(machine_id);
 
         // 1. Flush and freeze the guest filesystem so the disk is consistent
@@ -666,19 +592,18 @@ impl Runtime for FirecrackerRuntime {
         let result = (|| -> Result<u64> {
             // 2. Stop the vCPUs, 3. write the snapshot, 4. encrypt it.
             api_ok(api.patch("/vm", &serde_json::json!({ "state": "Paused" })), "pause vCPUs")?;
-            let (mem_plain, state_plain) = (work.join("memory"), work.join("vmstate"));
             api_ok(
                 api.put("/snapshot/create", &serde_json::json!({
                     "snapshot_type": "Full",
-                    "snapshot_path": state_plain,
-                    "mem_file_path": mem_plain,
+                    "snapshot_path": format!("{work_inner}/vmstate"),
+                    "mem_file_path": format!("{work_inner}/memory"),
                 })),
                 "create snapshot",
             )?;
             let keys = LocalKeyStore::new(KEYS_DIR);
             let key_id = LocalKeyStore::DEFAULT_KEY_ID;
-            snapcrypt::encrypt_file(&mem_plain, &mem_enc, &keys, key_id, &meta.for_kind("memory"), snapcrypt::DEFAULT_CHUNK)?;
-            snapcrypt::encrypt_file(&state_plain, &state_enc, &keys, key_id, &meta.for_kind("vmstate"), snapcrypt::DEFAULT_CHUNK)?;
+            snapcrypt::encrypt_file(&work.join("memory"), &mem_enc, &keys, key_id, &meta.for_kind("memory"), snapcrypt::DEFAULT_CHUNK)?;
+            snapcrypt::encrypt_file(&work.join("vmstate"), &state_enc, &keys, key_id, &meta.for_kind("vmstate"), snapcrypt::DEFAULT_CHUNK)?;
             Ok(std::fs::metadata(&mem_enc)?.len() + std::fs::metadata(&state_enc)?.len())
         })();
         // Plaintext memory never outlives this call.
@@ -700,9 +625,6 @@ impl Runtime for FirecrackerRuntime {
 
         // 5. The snapshot is safe on disk: stop the VMM and free its memory.
         kill_and_wait(pid)?;
-        for f in [Self::socket_path(machine_id), vsock, Self::pid_path(machine_id)] {
-            let _ = std::fs::remove_file(f);
-        }
         state.update_machine_status(machine_id, "paused", None)?;
 
         Ok(PauseResult {
@@ -720,49 +642,52 @@ impl Runtime for FirecrackerRuntime {
         if machine.status != "paused" {
             bail!("{machine_id} is {}, not paused", machine.status);
         }
-        let dir = machine_dir(machine_id);
-        let (mem_enc, state_enc) = (dir.join("memory.snap"), dir.join("vmstate.snap"));
+        let jail = Self::jail_for(machine_id, state)?;
+        let snap_dir = Jail::snapshot_dir_for(machine_id);
+        let (mem_enc, state_enc) = (snap_dir.join("memory.snap"), snap_dir.join("vmstate.snap"));
         if !mem_enc.exists() || !state_enc.exists() {
             bail!("{machine_id} is marked paused but its snapshot files are missing");
         }
 
         // A memory snapshot only restores on the same CPU model, kernel,
         // and Firecracker version it was taken with.
-        let (fc_bin, kernel_path) = assets::ensure_assets()?;
-        let expected = SnapshotBinding::current(machine_id, &kernel_path)?;
+        let assets = assets::ensure_assets()?;
+        let expected = SnapshotBinding::current(machine_id, &assets.kernel)?;
         for (path, kind) in [(&mem_enc, "memory"), (&state_enc, "vmstate")] {
             let (_, found) = snapcrypt::read_meta(path)?;
             expected.check(&found, kind)?;
         }
 
-        let work = dir.join("snapshot.work");
+        let work_inner = "/snapshot.work";
+        let work = jail.host_path(work_inner);
         let _ = std::fs::remove_dir_all(&work);
-        std::fs::DirBuilder::new().mode(0o700).create(&work)?;
-        let (mem_plain, state_plain) = (work.join("memory"), work.join("vmstate"));
+        mkdir_private(&work)?;
         let keys = LocalKeyStore::new(KEYS_DIR);
 
-        let sock_path = Self::socket_path(machine_id);
-        let vsock = Self::vsock_path(machine_id);
         let result = (|| -> Result<u32> {
-            snapcrypt::decrypt_file(&mem_enc, &mem_plain, &keys)?;
-            snapcrypt::decrypt_file(&state_enc, &state_plain, &keys)?;
+            snapcrypt::decrypt_file(&mem_enc, &work.join("memory"), &keys)?;
+            snapcrypt::decrypt_file(&state_enc, &work.join("vmstate"), &keys)?;
+            for p in [work.clone(), work.join("memory"), work.join("vmstate")] {
+                jail.give(&p)?;
+            }
 
-            // Firecracker re-binds both sockets from the snapshot.
-            let _ = std::fs::remove_file(&sock_path);
-            let _ = std::fs::remove_file(&vsock);
-            let pid = spawn_firecracker(&fc_bin, machine_id)?;
+            // Start a fresh jailed VMM on the same jail.
+            jail.reset_for_restart()?;
+            jail.prepare(&assets.kernel)?;
+            let pid = jail.spawn(&assets.jailer, &assets.firecracker, machine.memory_mb, machine.cpus)?;
             let restore = (|| -> Result<()> {
-                let api = FirecrackerApi::new(&sock_path).with_timeout(std::time::Duration::from_secs(600));
+                let api = Self::api(machine_id).with_timeout(SNAPSHOT_API_TIMEOUT);
                 api.wait_for_ready(5000)?;
                 api_ok(
                     api.put("/snapshot/load", &serde_json::json!({
-                        "snapshot_path": state_plain,
-                        "mem_backend": { "backend_type": "File", "backend_path": mem_plain },
+                        "snapshot_path": format!("{work_inner}/vmstate"),
+                        "mem_backend": { "backend_type": "File", "backend_path": format!("{work_inner}/memory") },
                         "enable_diff_snapshots": false,
                         "resume_vm": true,
                     })),
                     "load snapshot",
                 )?;
+                let vsock = Self::vsock_path(machine_id);
                 fc_vsock::wait_for_agent(&vsock, 15_000)?;
                 let session = fc_vsock::connect_wire(&vsock)?;
                 let now = std::time::SystemTime::now()
@@ -774,7 +699,6 @@ impl Runtime for FirecrackerRuntime {
             })();
             if let Err(e) = restore {
                 let _ = kill_and_wait(pid);
-                let _ = std::fs::remove_file(Self::pid_path(machine_id));
                 return Err(e);
             }
             Ok(pid)

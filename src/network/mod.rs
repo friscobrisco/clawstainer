@@ -1,7 +1,6 @@
 pub mod bridge;
 pub mod ipam;
 pub mod nat;
-pub mod tap;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};

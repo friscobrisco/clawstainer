@@ -260,8 +260,19 @@ pub fn remove_table() -> Result<()> {
 /// Create the TAP, address it, lock it down, and install its rules.
 /// On failure, whatever was created is removed again.
 pub fn setup(vm: &VmNet) -> Result<()> {
+    setup_owned(vm, None)
+}
+
+/// Like [`setup`], with the TAP owned by `(uid, gid)` so an unprivileged
+/// (jailed) VMM can attach to it without `CAP_NET_ADMIN`.
+pub fn setup_owned(vm: &VmNet, owner: Option<(u32, u32)>) -> Result<()> {
     ensure_table()?;
-    let res = run("ip", &["tuntap", "add", "dev", &vm.tap, "mode", "tap"]).and_then(|_| attach(vm));
+    let mut args = vec!["tuntap".to_string(), "add".into(), "dev".into(), vm.tap.clone(), "mode".into(), "tap".into()];
+    if let Some((uid, gid)) = owner {
+        args.extend(["user".into(), uid.to_string(), "group".into(), gid.to_string()]);
+    }
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let res = run("ip", &args).and_then(|_| attach(vm));
     if res.is_err() {
         teardown(vm);
     }

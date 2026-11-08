@@ -11,21 +11,34 @@ fn fc_url(arch: &str) -> String {
     )
 }
 
-/// Ensure the Firecracker binary and kernel are available
-pub fn ensure_assets() -> Result<(PathBuf, PathBuf)> {
+/// Paths to the binaries and kernel a Firecracker VM needs.
+pub struct Assets {
+    pub firecracker: PathBuf,
+    pub jailer: PathBuf,
+    pub kernel: PathBuf,
+}
+
+/// Ensure the Firecracker and jailer binaries and the kernel are available
+pub fn ensure_assets() -> Result<Assets> {
     let base = PathBuf::from(FC_DIR);
     let bin_path = base.join("bin").join("firecracker");
+    let jailer_path = base.join("bin").join("jailer");
     let kernel_path = base.join("kernels").join("vmlinux");
+    let assets = Assets {
+        firecracker: bin_path.clone(),
+        jailer: jailer_path.clone(),
+        kernel: kernel_path.clone(),
+    };
 
-    if bin_path.exists() && kernel_path.exists() {
-        return Ok((bin_path, kernel_path));
+    if bin_path.exists() && jailer_path.exists() && kernel_path.exists() {
+        return Ok(assets);
     }
 
     std::fs::create_dir_all(base.join("bin"))?;
     std::fs::create_dir_all(base.join("kernels"))?;
 
-    // Download Firecracker binary
-    if !bin_path.exists() {
+    // Download the Firecracker release (firecracker + jailer)
+    if !bin_path.exists() || !jailer_path.exists() {
         let arch = match std::env::consts::ARCH {
             "aarch64" => "aarch64",
             "x86_64" => "x86_64",
@@ -39,14 +52,12 @@ pub fn ensure_assets() -> Result<(PathBuf, PathBuf)> {
             .args([
                 "-c",
                 &format!(
-                    "curl -fSL '{}' | tar xz -C '{}' --strip-components=1 && \
-                     mv '{}/firecracker-{}-{}' '{}'",
-                    url,
-                    base.join("bin").display(),
-                    base.join("bin").display(),
-                    FC_VERSION,
-                    arch,
-                    bin_path.display(),
+                    "curl -fSL '{url}' | tar xz -C '{bin}' --strip-components=1 && \
+                     mv '{bin}/firecracker-{FC_VERSION}-{arch}' '{fc}' && \
+                     mv '{bin}/jailer-{FC_VERSION}-{arch}' '{jailer}'",
+                    bin = base.join("bin").display(),
+                    fc = bin_path.display(),
+                    jailer = jailer_path.display(),
                 ),
             ])
             .status()
@@ -58,7 +69,7 @@ pub fn ensure_assets() -> Result<(PathBuf, PathBuf)> {
 
         // Make executable
         Command::new("chmod")
-            .args(["+x", bin_path.to_str().unwrap()])
+            .args(["+x", bin_path.to_str().unwrap(), jailer_path.to_str().unwrap()])
             .status()?;
 
         eprintln!("Firecracker binary ready.");
@@ -91,5 +102,5 @@ pub fn ensure_assets() -> Result<(PathBuf, PathBuf)> {
         eprintln!("Kernel ready.");
     }
 
-    Ok((bin_path, kernel_path))
+    Ok(assets)
 }

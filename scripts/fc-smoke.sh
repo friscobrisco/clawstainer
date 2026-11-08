@@ -42,7 +42,9 @@ leak_check() {
   check "no firecracker processes" bash -c '! pgrep -x firecracker >/dev/null'
   check "no tap devices" bash -c '! ip -br link | grep -q "^tap-"'
   check "no nftables tables" bash -c '! nft list tables | grep -q clawstainer'
-  check "no machine directories" bash -c '[[ -z "$(ls -A /var/lib/clawstainer/machines 2>/dev/null)" ]]'
+  check "no jails" bash -c '[[ -z "$(ls -A /var/lib/clawstainer/jail/firecracker 2>/dev/null)" ]]'
+  check "no snapshots" bash -c '[[ -z "$(ls -A /var/lib/clawstainer/snapshots 2>/dev/null)" ]]'
+  check "no VM cgroups" bash -c '[[ -z "$(find /sys/fs/cgroup/clawstainer -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]]'
   check "no machines in state" python3 -c "
 import json, os, sys
 p = '$STATE'
@@ -63,6 +65,17 @@ for ((i = 1; i <= LOOPS; i++)); do
   fi
   rm -f "$err"
   printf '  ok    create %s (%.1fs)\n' "$id" "$(echo "$(date +%s.%N) - $start" | bc)"
+
+  # The VMM runs jailed: own uid, no capabilities, own cgroup, seccomp.
+  pid=$(pgrep -a -x firecracker | awk -v id="$id" '$0 ~ id {print $1; exit}')
+  check "VMM is not root" test "$(stat -c %u /proc/"$pid")" -ge 400000
+  check "VMM has no capabilities" grep -q '^CapEff:\s*0000000000000000$' /proc/"$pid"/status
+  # The jailer pivot_roots in its own mount namespace, so check what the
+  # VMM can see rather than the link text.
+  check "VMM sees only its jail" bash -c "test -e /proc/$pid/root/rootfs.ext4 && test ! -e /proc/$pid/root/etc/passwd && test ! -e /proc/$pid/root/root/.clawstainer"
+  check "VMM in its own cgroup" grep -q "^0::/clawstainer/$id\$" /proc/"$pid"/cgroup
+  check "VMM memory limit set" test "$(cat /sys/fs/cgroup/clawstainer/"$id"/memory.max)" != "max"
+  check "seccomp on VMM threads" bash -c "grep -h '^Seccomp:' /proc/$pid/task/*/status | grep -q 'Seccomp:\s*2'"
 
   check "exec stdout" test "$(vm "$id" 'echo hello')" = "hello"
   check "exec exit code" test "$(vm "$id" 'exit 7' exit_code)" = "7"
@@ -86,12 +99,13 @@ import json, sys; m = json.load(open('$STATE'))['machines']['$id']; sys.exit(0 i
   before_pid=$(vm "$id" 'cat /dev/shm/pid')
   check "pause" bash -c "'$BIN' pause $id >/dev/null"
   check "no VMM while paused" bash -c "! pgrep -a -x firecracker | grep -q $id"
-  check "snapshot is encrypted at rest" bash -c "head -c 8 /var/lib/clawstainer/machines/$id/memory.snap | grep -q CLAWSNP1"
-  check "no plaintext snapshot left" test ! -e "/var/lib/clawstainer/machines/$id/snapshot.work"
+  check "snapshot is encrypted at rest" bash -c "head -c 8 /var/lib/clawstainer/snapshots/$id/memory.snap | grep -q CLAWSNP1"
+  check "snapshot outside the jail, root-only" test "$(stat -c '%u %a' /var/lib/clawstainer/snapshots/$id/memory.snap)" = "0 600"
+  check "no plaintext snapshot left" test ! -e "/var/lib/clawstainer/jail/firecracker/$id/root/snapshot.work"
   check "exec refused while paused" bash -c "! '$BIN' exec $id true >/dev/null 2>&1"
 
   # A corrupted snapshot must fail to resume and leave the VM paused.
-  snap="/var/lib/clawstainer/machines/$id/memory.snap"
+  snap="/var/lib/clawstainer/snapshots/$id/memory.snap"
   cp "$snap" "$snap.bak"
   printf '\xff' | dd of="$snap" bs=1 seek=4096 conv=notrunc status=none
   check "corrupt snapshot refused" bash -c "! '$BIN' resume $id >/dev/null 2>&1"

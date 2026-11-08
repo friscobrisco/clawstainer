@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::process::Command;
 
 const FC_DIR: &str = "/var/lib/clawstainer/firecracker";
-const MACHINES_DIR: &str = "/var/lib/clawstainer/machines";
 const ROOTFS_SIZE_MB: u64 = 2048;
 
 const AGENT_SERVICE: &str = r#"[Unit]
@@ -190,32 +189,18 @@ pub fn ensure_base_ext4() -> Result<PathBuf> {
     Ok(base_ext4)
 }
 
-/// Create a per-VM rootfs by sparse-copying the base ext4 image
-pub fn create_vm_rootfs(machine_id: &str) -> Result<PathBuf> {
+/// Create a VM's rootfs at `dest` by sparse-copying the base ext4 image.
+/// The file is private (0600); the caller hands it to the VM's uid.
+pub fn create_vm_rootfs(dest: &std::path::Path) -> Result<()> {
     let base_ext4 = ensure_base_ext4()?;
-    let machine_dir = PathBuf::from(MACHINES_DIR).join(machine_id);
-    std::fs::create_dir_all(&machine_dir)?;
-
-    let vm_rootfs = machine_dir.join("rootfs.ext4");
-
     let status = Command::new("cp")
-        .args(["--sparse=always", base_ext4.to_str().unwrap(), vm_rootfs.to_str().unwrap()])
+        .args(["--sparse=always", base_ext4.to_str().unwrap(), dest.to_str().unwrap()])
         .status()
         .context("Failed to copy rootfs for VM")?;
-
     if !status.success() {
         anyhow::bail!("Failed to create VM rootfs");
     }
-
-    Ok(vm_rootfs)
-}
-
-/// Clean up a VM's rootfs
-pub fn cleanup_vm_rootfs(machine_id: &str) -> Result<()> {
-    let machine_dir = PathBuf::from(MACHINES_DIR).join(machine_id);
-    if machine_dir.exists() {
-        std::fs::remove_dir_all(&machine_dir)
-            .context("Failed to remove VM directory")?;
-    }
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
