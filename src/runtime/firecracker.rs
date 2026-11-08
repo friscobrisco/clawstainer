@@ -759,6 +759,16 @@ impl Runtime for FirecrackerRuntime {
         }
 
         let _lock = op_lock(machine_id, true)?;
+        // After a host reboot the VM's TAP and firewall chain are gone (the
+        // jail and encrypted snapshot survive): recreate them on the same
+        // slot, so the restored guest keeps its address.
+        if machine.network == "nat" {
+            let vm = VmNet::new(jail.uid - jail::UID_BASE, machine_id)?;
+            if !Path::new("/sys/class/net").join(&vm.tap).exists() {
+                vmnet::setup_owned(&vm, Some((jail.uid, jail.gid)))
+                    .context("could not recreate the VM's network")?;
+            }
+        }
         // An interrupted earlier resume may have left a VMM (and plaintext)
         // behind; start from a clean jail.
         if let Some(pid) = Self::live_pid(machine_id, None) {
